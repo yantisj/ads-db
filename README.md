@@ -135,10 +135,11 @@ lon = -79.9400
 ```
 wget https://data.flightairmap.com/data/basestation/BaseStation.sqb.gz
 gunzip BaseStation.sqb.gz
+mkdir sqb
 mv BaseStation.sqb sqb/
 ```
 
-### Test pointing ads-db to localhost's receiver (initializes database)
+### Test pointing ads-db to localhost's receiver (initializes database...)
 ```
 ./ads-db-py -D -v
 

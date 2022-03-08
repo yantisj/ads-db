@@ -1318,7 +1318,7 @@ parser.add_argument("-fa", type=int, help="Filter Low Altitude")
 parser.add_argument("-fc", type=int, help="Filter Category Above int (A[3])")
 parser.add_argument("-fc0", action="store_true", help="Filter A0 no categories")
 parser.add_argument("-fm", action="store_true", help="Filter Military Planes")
-parser.add_argument("-fh", type=int, help="Filter by hours since seen")
+parser.add_argument("-fh", type=float, help="Filter by hours since seen")
 parser.add_argument("-fd", type=int, help="Filter by Days Seen Above Count")
 parser.add_argument(
     "-sc", type=int, help="Save Cycle (increase > 10 to reduce disk writes)"
