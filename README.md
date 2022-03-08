@@ -11,7 +11,32 @@ Keep track of every plane you've seen. Get alerted to when a specific plane is o
 
 ### Command Help
 ```
+Save ADSB Data to SQLite
 
+optional arguments:
+  -h, --help    show this help message and exit
+  -D            Run Daemon
+  -st           Database Stats
+  -rs RS        Receiver IP List separated by commas (default 127.0.0.1)
+  -rf RF        Refresh Interval (default 10sec)
+  -db DB        Different Database File
+  -lt LT        Lookup Planes by Type
+  -lts LTS      Lookup Type Totals by type (use percent-sign for all type)
+  -li LI        Lookup Planes by IACO
+  -ld LD        Lookup Planes by IDENT
+  -lr LR        Lookup Planes by Registration
+  -af AF        Alert on Flight Name / ICAO
+  -ad AD        Alert Distance from Receiver (default unlimited)
+  -fa FA        Filter Low Altitude
+  -fc FC        Filter Category Above int (A[3])
+  -fc0          Filter A0 no categories
+  -fm           Filter Military Planes
+  -fd FD        Filter by Days Seen Above Count
+  -sc SC        Save Cycle (increase > 10 to reduce disk writes)
+  -S            Play Sounds
+  -v            Debug Mode
+  --update_db   Update all planes with latest DB info
+  --cleanup_db  Cleanup excess plane days
 ```
 
 ## Usage Examples
@@ -84,8 +109,8 @@ IACO   IDENT        DST MIN  ALT     LOW     FIRST                 LAST
 
 ## Install Instruction for Raspberry Pi with Flightaware installed
 
-### Clone the git repo
-```git clone https:// ads-db/```
+### Clone the git repo to home directory: /home/pi
+```git clone https://github.com/yantisj/ads-db ads-db/```
 
 ### Install virtualenv and required packages
 ```

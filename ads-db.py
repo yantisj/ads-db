@@ -1278,7 +1278,7 @@ signal.signal(signal.SIGTERM, sigterm_handler)
 
 check_quiet_time()
 
-parser = argparse.ArgumentParser(description="Save ADS-B Data to SQLite")
+parser = argparse.ArgumentParser(description="Save ADSB Data to SQLite")
 parser.add_argument("-D", action="store_true", help="Run Daemon")
 parser.add_argument("-st", action="store_true", help="Database Stats")
 parser.add_argument(
