@@ -1,0 +1,12 @@
+venv/
+planes.db
+planes.db*
+ads-db-planes.sqb
+ads-db-planes.sqb*
+*.log
+*.out
+*.gz
+.DS_Store
+BaseStation.sqb*
+start-env.sh
+ads-db.conf

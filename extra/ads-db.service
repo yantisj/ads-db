@@ -1,0 +1,12 @@
+[Unit]
+Description=ADS-DB Collector
+After=ads-db.service
+
+[Service]
+Type=simple
+ExecStart=/home/pi/ads-db/extra/ads-db.sh
+TimeoutStopSec=30
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target

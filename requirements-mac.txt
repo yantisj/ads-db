@@ -1,0 +1,5 @@
+pyobjc
+playsound
+selenium
+requests
+mpu

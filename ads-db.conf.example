@@ -1,0 +1,14 @@
+[global]
+lat = 32.78
+lon = -79.94
+
+[alerts]
+landing = false
+boeing = false
+sounds = false
+
+# Database files that need updating occasionally
+[db]
+base_station = sqb/BaseStation.sqb
+flight_aware = flightaware-20211210.csv
+
