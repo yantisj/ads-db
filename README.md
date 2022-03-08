@@ -127,8 +127,8 @@ pip install -r requirements.txt
 Edit file and set your local lat/lon
 ```
 [global]
-lat = 32.78
-lon = -79.94
+lat = 32.7800
+lon = -79.9400
 ```
 
 ### Install the latest BaseStation.sqb from https://data.flightairmap.com/

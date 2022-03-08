@@ -116,7 +116,7 @@ def create_connection(db_file):
         "pragma synchronous = normal;",
         "pragma temp_store = memory;",
         "pragma mmap_size = 30000000000;",
-        "pragma optimize;"
+        "pragma optimize;",
     ]
     for cmd in commands:
         res = cur.execute(cmd)
@@ -130,7 +130,7 @@ def create_table(conn, create_table_sql):
     :return:
     """
     try:
-        print('Setup:', create_table_sql)
+        print("Setup:", create_table_sql)
         c = conn.cursor()
         c.execute(create_table_sql)
     except Error as e:
@@ -174,7 +174,7 @@ def update_plane(
         rows = cur.fetchall()
     except sqlite3.OperationalError as e:
         logger.warning(f"New Database: Trying to create DB: {e}")
-        
+
         create_table(conn, sql_create_planes_table)
         create_table(conn, sql_create_types_table)
         create_table(conn, sql_create_plane_days_table)
@@ -191,7 +191,7 @@ def update_plane(
             "pragma optimize;",
         ]
         for cmd in commands:
-            print('DB Setup:', cmd)
+            print("DB Setup:", cmd)
             res = cur.execute(cmd)
 
         return
@@ -417,7 +417,9 @@ def get_day_count(icao):
     return count
 
 
-def lookup_ptype(ptype, count=0, cat_min=0, low_alt=0, no_a0=False, military=True):
+def lookup_ptype(
+    ptype, count=0, cat_min=0, low_alt=0, no_a0=False, military=True, hours=0
+):
 
     cur = conn.cursor()
     cur.execute(
@@ -425,12 +427,19 @@ def lookup_ptype(ptype, count=0, cat_min=0, low_alt=0, no_a0=False, military=Tru
     )
     rows = cur.fetchall()
     new_rows = list()
+
+    hours_ago = None
+    if hours:
+        hours_ago = datetime.now() - timedelta(hours=hours)
+
     for row in rows:
         add = True
         if count and not row[17]:
             continue
         if count and row[17] and row[17] < count:
             # print('too low', row, row[17])
+            continue
+        if hours_ago and row[12] < hours_ago:
             continue
         if cat_min:
             if row[18]:
@@ -770,7 +779,11 @@ def alert_ident(ident, sites=["127.0.0.1"], min_distance=0):
                         icao = p["hex"].upper().replace("~", "")
                     if "lat" in p:
                         distance = mpu.haversine_distance(
-                            (p["lat"], p["lon"]), (float(config['global']['lat']), float(config['global']['lon']))
+                            (p["lat"], p["lon"]),
+                            (
+                                float(config["global"]["lat"]),
+                                float(config["global"]["lon"]),
+                            ),
                         )
                         distance = round(distance * 0.621371, 1)
                     if flight == ident or icao == ident:
@@ -1104,7 +1117,11 @@ def run_daemon(refresh=10, sites=["127.0.0.1"]):
 
                         # KM -> NM
                         distance = mpu.haversine_distance(
-                            (lat, lon), (float(config['global']['lat']), float(config['global']['lon']))
+                            (lat, lon),
+                            (
+                                float(config["global"]["lat"]),
+                                float(config["global"]["lon"]),
+                            ),
                         )
                         distance = round(distance * 0.621371, 1)
                         # print('distance', distance)
@@ -1195,7 +1212,7 @@ def run_daemon(refresh=10, sites=["127.0.0.1"]):
                             logger.debug(
                                 f"No Plane Type: {icao} {reg} {ptype} {flight} {squawk} {lat} {lon} {altitude} {heading} {distance} {speed}"
                             )
-                        if config['alerts']['landing'] in ['true', 'True', '1']:
+                        if config["alerts"]["landing"] in ["true", "True", "1"]:
                             alert_landing(
                                 icao,
                                 flight,
@@ -1210,7 +1227,7 @@ def run_daemon(refresh=10, sites=["127.0.0.1"]):
                                 baro_rate,
                                 category,
                             )
-                        if config['alerts']['boeing'] in ['true', 'True', '1']:
+                        if config["alerts"]["boeing"] in ["true", "True", "1"]:
                             alert_b787(
                                 icao,
                                 flight,
@@ -1243,14 +1260,14 @@ def run_daemon(refresh=10, sites=["127.0.0.1"]):
 def load_fadb():
     global lookup
     logger.info("FA Database Loading")
-    with open(config['db']['flight_aware'], "r") as f:
+    with open(config["db"]["flight_aware"], "r") as f:
         dr = csv.DictReader(f)
         for en in dr:
             fa_lookup[en["icao24"]] = (en["t"], en["r"])
         logger.debug("FA Database Loaded")
 
     # https://data.flightairmap.com/
-    lookup = create_connection(config['db']['base_station'])
+    lookup = create_connection(config["db"]["base_station"])
 
 
 def read_config(config_file):
@@ -1261,8 +1278,8 @@ def read_config(config_file):
 
     config = configparser.ConfigParser()
     config.read(config_file)
-    if config['alerts']['sounds'] in ['true', 'True', '1']:
-        logger.info('Enabling Sounds')
+    if config["alerts"]["sounds"] in ["true", "True", "1"]:
+        logger.info("Enabling Sounds")
         sounds = True
     return config
 
@@ -1301,6 +1318,7 @@ parser.add_argument("-fa", type=int, help="Filter Low Altitude")
 parser.add_argument("-fc", type=int, help="Filter Category Above int (A[3])")
 parser.add_argument("-fc0", action="store_true", help="Filter A0 no categories")
 parser.add_argument("-fm", action="store_true", help="Filter Military Planes")
+parser.add_argument("-fh", type=int, help="Filter by hours since seen")
 parser.add_argument("-fd", type=int, help="Filter by Days Seen Above Count")
 parser.add_argument(
     "-sc", type=int, help="Save Cycle (increase > 10 to reduce disk writes)"
@@ -1324,7 +1342,7 @@ else:
     logger = setup_logger()
 
 # Load config from file
-config = read_config('ads-db.conf')
+config = read_config("ads-db.conf")
 
 if args.db:
     conn = sqlite3.connect(
@@ -1371,9 +1389,12 @@ elif args.st:
     get_db_stats()
 elif args.lt:
     count = 0
+    hours = 0
     if args.fd:
         count = args.fd
 
+    if args.fh:
+        hours = args.fh
     cat_min = 0
     if args.fc:
         cat_min = args.fc
@@ -1396,6 +1417,7 @@ elif args.lt:
         low_alt=low_alt,
         no_a0=no_a0,
         military=military,
+        hours=hours,
     )
 elif args.lts:
     lookup_ptypes(args.lts)
@@ -1415,4 +1437,3 @@ else:
     parser.print_help()
 
 print()
-
