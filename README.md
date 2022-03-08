@@ -1,15 +1,25 @@
 # ADS-DB Install and User Guide
 
 ## What is ADS-DB?
-ADS-DB connects to one or more Piaware/dump1090-fa ADSB nodes and records the data on all planes seen in a database for later analysis. ADS-DB records the first and last time a plane is seen, each day, along with the last known altitude, heading and other information. This program will also record and flag all military planes seen.
+ADS-DB connects to one or more Piaware/dump1090-fa ADSB nodes and saves all planes to a SQLite database for later analysis. ADS-DB records the first and last time a plane is seen, each day, along with the last known altitude, heading and other information. This program will also record and flag all military planes seen.
 
-The program has been in testing for 3 years and can scale to tens of thousands of planes. When new registration/plane data is releases, you can go back and update your database with all the latest registration and plane data as it becomes available.
+The database has been in testing for 3 years and can scale to tens of thousands of planes. When new registration/plane data is released, you can backfill your database with all the latest registration data as it becomes available.
 
 ## Benefits
-Keep track of every plane you've seen. Get alerted to when a specific plane is overhead or even landing at a nearby airport. Also keeps a record of each planes registration data, IDENT, and detailed plane type information for each manufacturer for every plane your receiver detects.
+Keep track of every plane you've seen so you can check for past activity in your area. Get alerted to when a specific plane is overhead or even landing at a nearby airport. Keeps a record of each planes registration data, IDENT, and detailed plane type information for each manufacturer for every plane your receiver detects for additional analysis and reports.
 
 
-### Command Help
+## Database Summary
+```
+ADS-DB Plane Stats
+----------------------------------------------
+ Plane Types:  465    24hrs: 147    New: 0
+ Plane Totals: 31433  24hrs: 1735   New: 80
+
+Last Activity: 2022-03-08 16:58:20
+```
+
+## Command Help
 ```
 Save ADSB Data to SQLite
 
@@ -39,16 +49,23 @@ optional arguments:
   --cleanup_db  Cleanup excess plane days
 ```
 
-## Usage Examples
+# Useful Examples
 
-### All planes in the database
+### Specific plane lookup by IACO (or registration/ident)
 ```
-ADS-DB Database Stats
---------------------------
- Types: 465    24hr: 145    New: 0
- Total: 31431  24hr: 1787   New: 84
+ads -li 06A104
 
-Last Seen: 2022-03-08 15:10:26
+IACO   TYPE  REG         IDENT      CAT M CT  DST MIN  ALT     LOW     COUNTRY     OWNER                FIRST                 LAST
+----   ----  ----------  ---------  --- - --  --- ---  -----   -----   ----------  -------------------- -------------------   -------------------
+06A104 A359  A7-ALP      QTR777     A5    5   109 20   40000   35000   Qatar       Qatar Airways        2019-10-18 15:39:31   2020-03-02 15:03:26
+
+IACO   IDENT        DST MIN  ALT     LOW     FIRST                 LAST
+----   ----         --- ---  -----   -----   -------------------   -------------------
+06A104 QTR777       55  20   40000   39975   2019-10-18 15:39:31   2019-10-18 15:54:24
+06A104 QTR778       44  22   37000   37000   2019-11-12 19:46:29   2019-11-12 19:57:42
+06A104              104 104  35000   35000   2020-02-04 19:37:05   2020-02-04 19:55:52
+06A104 QTR777       106 48   43000   43000   2020-02-14 15:25:13   2020-02-14 15:45:09
+06A104 QTR777       109 109  40000   40000   2020-03-02 15:02:42   2020-03-02 15:03:25
 ```
 
 ### All Airbus 300 series plane types:
@@ -90,29 +107,12 @@ A670A3 A359  N514DN      DAL201     A5  . 2   102 5    36000   32200            
 ...
 ```
 
-### Specific plane lookup by IACO (or registration/ident)
-```
-ads -li 06A104
+# Install Instruction for Raspberry Pi with Flightaware installed
 
-IACO   TYPE  REG         IDENT      CAT M CT  DST MIN  ALT     LOW     COUNTRY     OWNER                FIRST                 LAST
-----   ----  ----------  ---------  --- - --  --- ---  -----   -----   ----------  -------------------- -------------------   -------------------
-06A104 A359  A7-ALP      QTR777     A5    5   109 20   40000   35000   Qatar       Qatar Airways        2019-10-18 15:39:31   2020-03-02 15:03:26
-
-IACO   IDENT        DST MIN  ALT     LOW     FIRST                 LAST
-----   ----         --- ---  -----   -----   -------------------   -------------------
-06A104 QTR777       55  20   40000   39975   2019-10-18 15:39:31   2019-10-18 15:54:24
-06A104 QTR778       44  22   37000   37000   2019-11-12 19:46:29   2019-11-12 19:57:42
-06A104              104 104  35000   35000   2020-02-04 19:37:05   2020-02-04 19:55:52
-06A104 QTR777       106 48   43000   43000   2020-02-14 15:25:13   2020-02-14 15:45:09
-06A104 QTR777       109 109  40000   40000   2020-03-02 15:02:42   2020-03-02 15:03:25
-```
-
-## Install Instruction for Raspberry Pi with Flightaware installed
-
-### Clone the git repo to home directory: /home/pi
+## Clone the git repo to home directory: /home/pi
 ```git clone https://github.com/yantisj/ads-db ads-db/```
 
-### Install virtualenv and required packages
+## Install virtualenv and required packages
 ```
 sudo apt install virtualenv
 cd ads-db/
@@ -121,7 +121,7 @@ source venv/bin/activate
 pip install -r requirements.txt
 ```
 
-### Copy over default config file and update lat/lon for distance calculations
+## Copy over default config file and update lat/lon for distance calculations
 ```cp ads-db.conf.example ads-db.conf```
 
 Edit file and set your local lat/lon
@@ -131,7 +131,7 @@ lat = 32.7800
 lon = -79.9400
 ```
 
-### Install the latest BaseStation.sqb from https://data.flightairmap.com/
+## Install the latest BaseStation.sqb from https://data.flightairmap.com/
 ```
 wget https://data.flightairmap.com/data/basestation/BaseStation.sqb.gz
 gunzip BaseStation.sqb.gz
@@ -139,7 +139,7 @@ mkdir sqb
 mv BaseStation.sqb sqb/
 ```
 
-### Test pointing ads-db to localhost's receiver (initializes database...)
+## Test pointing ads-db to localhost's receiver (initializes database...)
 ```
 ./ads-db-py -D -v
 
@@ -156,7 +156,7 @@ mv BaseStation.sqb sqb/
 ...
 ```
 
-### Press ctrl-c to exit the daemon and check your database stats
+## Press ctrl-c to exit the daemon and check your database stats
 ```
 ./ads-db.py -st
 
@@ -172,7 +172,7 @@ You should see planes in your database if it successfull connects to http://127.
 
 
 
-### Add the service to systemd and enable on startup
+## Add the service to systemd and enable on startup
 ```
 sudo cp extra/ads-db.service /etc/systemd/system/
 sudo systemctl enable ads-db
@@ -180,7 +180,7 @@ sudo systemctl start ads-db
 sudo systemctl status ads-db
 ```
 
-### Daemon Results
+## Daemon Results
 ```
 ● ads-db.service - ADS-DB Collector
      Loaded: loaded (/etc/systemd/system/ads-db.service; enabled; vendor preset: enabled)
@@ -200,29 +200,29 @@ Mar 08 15:44:30 ads-db-1 ads-db.sh[21027]: 2022-03-08 15:44:30,105 INFO     Daem
 Mar 08 15:44:31 ads-db-1 ads-db.sh[21027]: 2022-03-08 15:44:31,639 INFO     New Plane: A89BE8 t:GLF6 id:N654DG alt:36900 site:172.20.30.30
 ```
 
-## FAQ
+# FAQ
 
-### How to read from more than one receiver at a time?
+## How to read from more than one receiver at a time?
 
 Use the -r [receivers] command: ```./ads-db.py -D -r 192.168.1.10,192.168.1.20```
 
-### How do sounds work?
+## How do sounds work?
 
 Sounds are only tested on Macs. Use the requirements-mac.txt file to install your pip dependencies. Then enable sounds in the config file, and run the daemon locally to point to a remote receiver.
 
-### New database results are not showing up, what gives?
+## New database results are not showing up, what gives?
 
 By default, results are only written to the database every 50 minutes when running as a daemon. This prevents flash card wear. This can be adjusted in the extra/ads-db.sh file or via a command line option to always write out results, or decrease the cycle between writing the results to disk.
 
-### How do I watch for activity?
+## How do I watch for activity?
 
 ```tail -f ~/ads-db/ads-db.log```
 
-### What is the landing functionality?
+## What is the landing alert functionality?
 
 Landing alerts are not supported currently, but can be hacked by forking the code and changing the landing_alert method to suit your needs. The program can take a number of measurements to determine if a plane is on approach to your local runway, and play sounds to alert you.
 
-### What is the boeing 787 functionality
+## What is the boeing 787 functionality
 
 This was added for the author's hometown of Charleston, SC to detect whenver a newly manufactured 787 takes flight. This could be modified for your needs to track special planes, or see the other flight alerting capabilies for more ideas
 

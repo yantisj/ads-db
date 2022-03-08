@@ -853,13 +853,13 @@ def get_db_stats():
     #     tcount += 1
     #     if tcount < 10:
     #         print(en, sort_types[en])
-    print(f"\nADS-DB Database Stats")
-    print("--------------------------")
+    print(f"\nADS-DB Plane Stats")
+    print("----------------------------------------------")
     print(
-        f" Types: {type_count:<5}  24hr: {type_count_day:<3}    New: {type_count_new:<3}"
+        f" Plane Types:  {type_count:<5}  24hrs: {type_count_day:<3}    New: {type_count_new:<3}"
     )
-    print(f" Total: {total:<5}  24hr: {total_day:<4}   New: {total_new:<4}")
-    print(f"\nLast Seen: {last_seen}\n")
+    print(f" Plane Totals: {total:<5}  24hrs: {total_day:<4}   New: {total_new:<4}")
+    print(f"\nLast Activity: {last_seen}\n")
     return types
 
 
