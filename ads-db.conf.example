@@ -2,13 +2,13 @@
 lat = 32.7800
 lon = -79.9400
 
+# Alert and play sounds for different planes and events
 [alerts]
+sounds = false
+new_planes = B789,B78X
 landing = false
 boeing = false
-sounds = false
 
 # Database files that need updating occasionally
 [db]
 base_station = sqb/BaseStation.sqb
-flight_aware = flightaware-20211210.csv
-
