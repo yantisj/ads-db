@@ -132,6 +132,11 @@ lon = -79.9400
 ```
 
 ## Install the latest BaseStation.sqb from https://data.flightairmap.com/
+
+### Note: More accurate BaseStation.sqb available from radarspotting (registration required)
+- https://radarspotting.com/forum/index.php?action=tportal;sa=download;dl=item521
+
+
 ```
 wget https://data.flightairmap.com/data/basestation/BaseStation.sqb.gz
 gunzip BaseStation.sqb.gz

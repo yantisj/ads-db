@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 # Plane Tracker Database
 #  - Reads from http://{site}/dump1090-fa/data/aircraft.json
-#  - Relies on BaseStation.sqb from https://data.flightairmap.com/
+#  - Registration required better Basestation: 
+#       https://radarspotting.com/forum/index.php?action=tportal;sa=download;dl=item521
+#  - Relies on BaseStation.sqb from https://data.flightairmap.com/ (no registration)
 #  - Uses flightaware csv for IACO -> PTYPE quick lookup (included but needs updating)
 #
 from collections import defaultdict, OrderedDict
@@ -30,7 +32,6 @@ ptype_alerted = dict()
 pdict = dict()
 cdict = defaultdict(int)
 lookup = None
-fa_lookup = dict()
 sounds = False
 
 # Create tables if they don't exist
@@ -642,7 +643,7 @@ def lookup_model_mfr(icao):
     # cur.execute("SELECT * FROM Aircraft LEFT JOIN Model ON Aircraft.ModelID = Model.ModelID LEFT JOIN Operator ON Aircraft.OperatorID = Operator.OperatorID WHERE Aircraft.Icao = ?", (icao,))
     # cur.execute("select Icao,Engines,Model,Manufacturer from AircraftTypeView WHERE Icao = ? LIMIT 1;", (ptype,))
     cur.execute(
-        "SELECT ModeS,OperatorFlagCode,CurrentRegDate,ModeSCountry,Country,AircraftClass,Engines,YearBuilt,Manufacturer,Type,RegisteredOwners,Registration FROM Aircraft WHERE ModeS = ?",
+        "SELECT ModeS,OperatorFlagCode,CurrentRegDate,ModeSCountry,Country,AircraftClass,Engines,YearBuilt,Manufacturer,Type,RegisteredOwners,Registration,ICAOTypeCode FROM Aircraft WHERE ModeS = ?",
         (icao,),
     )
     rows = cur.fetchall()
@@ -672,7 +673,8 @@ def lookup_model_mfr(icao):
             elif re.search(r"United States Army", owner):
                 military = "M"
 
-        ptype = r[1]
+        ptype = r[12]
+
         if re.search(r"United\sStates", country):
             country = "USA"
 
@@ -897,10 +899,12 @@ def update_missing_data():
     cur = conn.cursor()
     cur2 = conn.cursor()
     now = datetime.now()
-    rows = dict_gen(cur.execute("SELECT * FROM planes"))
+    rows = dict_gen(cur.execute("SELECT * FROM planes ORDER BY lastseen"))
     # rows = cur.fetchall()
     count = 0
     models = dict()
+    ptyped = dict()
+    ptype_count = defaultdict(int)
 
     for row in rows:
         update = False
@@ -908,11 +912,6 @@ def update_missing_data():
         icao = row["icao"]
         ptype = ""
         reg = ""
-        if icao in fa_lookup:
-            # print('Plane Type', fa_lookup[icao])
-            ptype = fa_lookup[icao][0]
-            reg = fa_lookup[icao][1]
-        # print(dets)
 
         dets = lookup_model_mfr(icao)
         # print(dets)
@@ -922,10 +921,8 @@ def update_missing_data():
         owner = ""
         military = "."
         if dets[0]:
-            if not ptype:
-                logger.debug(f"Ptype secondary lookup: {icao} {dets[0]}")
-                ptype = dets[0]
-                reg = dets[6]
+            ptype = dets[0]
+            reg = dets[6]
             mfr = dets[1]
             model = dets[2]
             country = dets[3]
@@ -936,6 +933,9 @@ def update_missing_data():
                 models[ptype] = model
             elif len(model) > len(models[ptype]):
                 models[ptype] = model
+        ptype_count[ptype] += 1
+        if ptype and ptype not in ptyped:
+            ptyped[ptype] = dets
         if owner and owner != row["owner"]:
             print("Owner needs updating", row)
             update = True
@@ -987,6 +987,27 @@ def update_missing_data():
                 WHERE ptype = ? """
             cur3.execute(sql, (models[row["ptype"]], row["ptype"]))
             count += 1
+
+    # Update all plane type objects
+    for ptype in ptyped:
+        dets = ptyped[ptype]
+        nmfr = dets[1]
+        model = dets[2]
+        model = model[:50]
+        count = ptype_count[ptype]
+        if model and nmfr:
+            sql = """UPDATE plane_types SET manufacturer = ?, model = ?, count = ?
+                WHERE ptype = ? """
+            cur.execute(sql, (nmfr, model, count, ptype))
+    
+    # Remove bad plane type objects
+    rows = dict_gen(cur.execute("SELECT * from plane_types"))
+    for row in rows:
+        if row['ptype'] not in ptyped:
+            print('Missing ptype', row['ptype'])
+            cur3.execute("DELETE FROM plane_types WHERE ptype = ?", (row['ptype'], ))
+
+
 
     if count:
         logger.warning(f"Total Updates: {count}")
@@ -1146,25 +1167,15 @@ def run_daemon(refresh=10, sites=["127.0.0.1"]):
                         # lookup_type_reg(icao)
                         ptype = ""
                         reg = ""
-                        if icao in fa_lookup:
-                            # print('Plane Type', fa_lookup[icao])
-                            ptype = fa_lookup[icao][0]
-                            reg = fa_lookup[icao][1]
-
-                        dets = lookup_model_mfr(icao)
-                        # print(dets)
                         country = ""
                         model = ""
                         mfr = ""
                         owner = ""
                         military = "."
+                        dets = lookup_model_mfr(icao)
                         if dets[0]:
-                            if not ptype:
-                                logger.debug(
-                                    f"Ptype secondary lookup: {icao} {dets[0]}"
-                                )
-                                ptype = dets[0]
-                                reg = dets[6]
+                            ptype = dets[0]
+                            reg = dets[6]
                             mfr = dets[1]
                             model = dets[2]
                             model = model[:50]
@@ -1271,12 +1282,6 @@ def run_daemon(refresh=10, sites=["127.0.0.1"]):
 
 def load_fadb():
     global lookup
-    logger.info("FA Database Loading")
-    with open(config["db"]["flight_aware"], "r") as f:
-        dr = csv.DictReader(f)
-        for en in dr:
-            fa_lookup[en["icao24"]] = (en["t"], en["r"])
-        logger.debug("FA Database Loaded")
 
     # https://data.flightairmap.com/
     lookup = create_connection(config["db"]["base_station"])
