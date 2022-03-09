@@ -555,12 +555,17 @@ def print_plane_days(rows):
     return total
 
 
-def lookup_ptypes(ptype, hours=0):
+def lookup_ptypes(ptype, hours=0, mfr=None):
 
     cur = conn.cursor()
-    cur.execute(
-        "SELECT * FROM plane_types WHERE ptype LIKE ? ORDER BY count DESC", (ptype,)
-    )
+    if mfr:
+        cur.execute(
+            "SELECT * FROM plane_types WHERE manufacturer LIKE ? ORDER BY count DESC", (mfr,)
+        )
+    else:
+        cur.execute(
+            "SELECT * FROM plane_types WHERE ptype LIKE ? ORDER BY count DESC", (ptype,)
+        )
     rows = cur.fetchall()
     total = 0
     planes = 0
@@ -1327,6 +1332,7 @@ parser.add_argument(
 parser.add_argument("-li", type=str, help="Lookup Planes by IACO")
 parser.add_argument("-ld", type=str, help="Lookup Planes by IDENT")
 parser.add_argument("-lr", type=str, help="Lookup Planes by Registration")
+parser.add_argument("-lm", type=str, help="Lookup Planes by Manufacturer")
 parser.add_argument("-af", type=str, help="Alert on Flight Name / ICAO")
 parser.add_argument(
     "-ad", type=int, help="Alert Distance from Receiver (default unlimited)"
@@ -1442,12 +1448,22 @@ elif args.lts:
     if args.fh:
         hours = args.fh
     lookup_ptypes(args.lts, hours=hours)
+elif args.lm:
+    hours = 0
+    if args.fh:
+        hours = args.fh
+    lookup_ptypes(None, mfr=args.lm)
 elif args.li:
     lookup_icao(args.li)
 elif args.ld:
     lookup_ident(args.ld)
 elif args.lr:
     lookup_reg(args.lr)
+elif args.lm:
+    hours = 0
+    if args.fh:
+        hours = args.fh
+    lookup_ptypes(None, mfr=args.lm)
 elif args.af:
     sites = ["127.0.0.1"]
     refresh = 10
