@@ -141,7 +141,7 @@ mv BaseStation.sqb sqb/
 
 ## Test pointing ads-db to localhost's receiver (initializes database...)
 ```
-./ads-db-py -D -v
+./ads-db.py -D -v
 
 2022-03-08 15:27:46,515 INFO     FA Database Loading
 2022-03-08 15:28:19,007 INFO     Daemon Started

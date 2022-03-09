@@ -1,11 +1,8 @@
 #!/usr/bin/env python3
-# Plane Tracker
-#
-# first seen, last seen, flight #s, plane types
-# CREATE INDEX icao_idx ON planes(icao);
-# CREATE INDEX ptype_idx ON planes(ptype);
-# CREATE INDEX icao_day_idx ON plane_days(icao);
-# CREATE INDEX plane_day_idx ON plane_days(day);
+# Plane Tracker Database
+#  - Reads from http://{site}/dump1090-fa/data/aircraft.json
+#  - Relies on BaseStation.sqb from https://data.flightairmap.com/
+#  - Uses flightaware csv for IACO -> PTYPE quick lookup (included but needs updating)
 #
 from collections import defaultdict, OrderedDict
 from operator import itemgetter
@@ -142,7 +139,7 @@ def play_sound(filename):
 
     global sounds
 
-    if sounds:
+    if sounds and check_quiet_time():
         playsound(filename)
 
 
@@ -557,7 +554,7 @@ def print_plane_days(rows):
     return total
 
 
-def lookup_ptypes(ptype):
+def lookup_ptypes(ptype, hours=0):
 
     cur = conn.cursor()
     cur.execute(
@@ -569,7 +566,13 @@ def lookup_ptypes(ptype):
     print(
         "MFR      TYPE  CNT  LAST_IDENT      FIRST SEEN            LAST SEEN             MODEL"
     )
+    hours_ago = None
+    if hours:
+        hours_ago = datetime.now() - timedelta(hours=hours)
+
     for row in rows:
+        if hours_ago and row[3] < hours_ago:
+            continue
         cnt = 1
         if row[4]:
             cnt = row[4]
@@ -1171,6 +1174,15 @@ def run_daemon(refresh=10, sites=["127.0.0.1"]):
 
                         # print(f'{icao} {reg} {ptype} {flight} {category} {squawk} {lat} {lon} {altitude} {heading} {distance} {speed}')
 
+                        # Play sounds on emergency bit set
+                        if "emergency" in p:
+                            if p["emergency"] and p["emergency"] != 'none':
+                                if icao not in alerted:
+                                    alerted[icao] = 1
+                                    logger.warning(f'Emergency Bit Set! {p["emergency"]}: i:{icao} r:{reg} t:{ptype} f:{flight} c:{category} a:{altitude} h:{heading} d:{distance} s:{speed}')
+                                    play_sound("/Users/yantisj/dev/ads-db/sounds/warnone.mp3")
+                                    play_sound("/Users/yantisj/dev/ads-db/sounds/warntwo.mp3")
+
                         update_plane_day(
                             icao,
                             flight,
@@ -1387,6 +1399,7 @@ elif args.D:
         conn.commit()
 elif args.st:
     get_db_stats()
+
 elif args.lt:
     count = 0
     hours = 0
@@ -1420,7 +1433,10 @@ elif args.lt:
         hours=hours,
     )
 elif args.lts:
-    lookup_ptypes(args.lts)
+    hours = 0
+    if args.fh:
+        hours = args.fh
+    lookup_ptypes(args.lts, hours=hours)
 elif args.li:
     lookup_icao(args.li)
 elif args.ld:
