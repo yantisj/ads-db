@@ -54,6 +54,7 @@ STATIC_CALL_SIGNS = [
     "VOC",
     "ICE",
     "AAY",
+    "EDV",
 ]
 
 # Create tables if they don't exist
@@ -209,7 +210,9 @@ def update_plane(
     global sounds
 
     # Play sounds on new versions of these aircraft
-    alert_types = config["alerts"]["new_planes"].split(",")
+    alert_types = dict()
+    if "new_planes" in config["alerts"]:
+        alert_types = config["alerts"]["new_planes"].split(",")
     if "local_planes" in config["alerts"]:
         local_types = config["alerts"]["local_planes"].split(",")
     else:
