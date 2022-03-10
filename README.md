@@ -1,12 +1,12 @@
 # ADS-DB Install and User Guide
 
-## What is ADS-DB?
-ADS-DB connects to one or more Piaware/dump1090-fa ADSB nodes and saves all planes to a SQLite database for later analysis. ADS-DB records the first and last time a plane is seen, each day, along with the last known altitude, heading and other information. This program will also record and flag all military planes seen.
+## Benefits of ADS-DB
+Keep track of every plane/flight you're receiever has ever seen, so you can check for past activity in your area. Get alerted to when a specific plane is overhead or even landing at a nearby airport with approach detection. Keeps a record of each planes registration data, IDENT, and detailed plane information for each manufacturer for every plane your receiver detects for additional analysis and reporting.
+
+## Tell me more about ADS-DB?
+ADS-DB connects to one or more Piaware/dump1090-fa ADSB nodes and saves all planes and flights to a SQLite database for later analysis. ADS-DB records the first and last time a plane is seen, each day, along with the last known altitude, heading and other information. This program will also record and flag all military planes seen.
 
 The database has been in testing for 3 years and can scale to tens of thousands of planes. When new registration/plane data is released, you can backfill your database with all the latest registration data as it becomes available.
-
-## Benefits
-Keep track of every plane you've seen so you can check for past activity in your area. Get alerted to when a specific plane is overhead or even landing at a nearby airport. Keeps a record of each planes registration data, IDENT, and detailed plane type information for each manufacturer for every plane your receiver detects for additional analysis and reports.
 
 
 ## Database Summary

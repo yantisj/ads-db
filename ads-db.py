@@ -12,6 +12,7 @@ import time
 import re
 import sqlite3
 import logging
+from unittest import signals
 import requests
 import mpu
 from sqlite3 import Error
@@ -33,6 +34,27 @@ pdict = dict()
 cdict = defaultdict(int)
 lookup = None
 sounds = False
+
+STATIC_CALL_SIGNS = [
+    "DAL",
+    "SWA",
+    "RPA",
+    "UAL",
+    "AAL",
+    "JBU",
+    "FFT",
+    "MXY",
+    "NKS",
+    "JIA",
+    "FDX",
+    "UPS",
+    "ACA",
+    "ENY",
+    "ROU",
+    "VOC",
+    "ICE",
+
+]
 
 # Create tables if they don't exist
 sql_create_planes_table = """ CREATE TABLE IF NOT EXISTS planes (
@@ -73,6 +95,24 @@ sql_create_plane_days_table = """ CREATE TABLE IF NOT EXISTS plane_days (
                                     lastseen timestamp
                                 ); """
 
+sql_create_flights_table = """ CREATE TABLE IF NOT EXISTS flights (
+                                    flight text PRIMARY KEY,
+                                    icao text,
+                                    ptype text,
+                                    distance float,
+                                    closest float,
+                                    altitude float,
+                                    lowest_altitude float,
+                                    speed float,
+                                    lowest_speed float,
+                                    squawk text,
+                                    heading float,
+                                    registration text,
+                                    day_count integer,
+                                    firstseen timestamp,
+                                    lastseen timestamp
+                                ); """
+
 sql_create_types_table = """ CREATE TABLE IF NOT EXISTS plane_types (
                                     ptype text PRIMARY KEY,
                                     last_icao text,
@@ -86,6 +126,8 @@ sql_create_types_table = """ CREATE TABLE IF NOT EXISTS plane_types (
 
 def setup_logger(logfile="ads-db.log", level=logging.INFO):
 
+    logging.getLogger("urllib3").setLevel(logging.WARNING)
+
     logFormatter = logging.Formatter("%(asctime)s %(levelname)-8s %(message)s")
     logger = logging.getLogger()
 
@@ -96,7 +138,7 @@ def setup_logger(logfile="ads-db.log", level=logging.INFO):
     consoleHandler = logging.StreamHandler()
     consoleHandler.setFormatter(logFormatter)
     logger.addHandler(consoleHandler)
-    logger.setLevel(logging.INFO)
+    logger.setLevel(level)
 
     return logger
 
@@ -167,17 +209,17 @@ def update_plane(
     global sounds
 
     # Play sounds on new versions of these aircraft
-    alert_types = config['alerts']['new_planes'].split(',')
-    if 'local_planes' in config['alerts']:
-        local_types = config['alerts']['local_planes'].split(',')
+    alert_types = config["alerts"]["new_planes"].split(",")
+    if "local_planes" in config["alerts"]:
+        local_types = config["alerts"]["local_planes"].split(",")
     else:
         local_types = dict()
-    if 'local_altitude' in config['alerts']:
-        local_altitude = int(config['alerts']['local_altitude'])
+    if "local_altitude" in config["alerts"]:
+        local_altitude = int(config["alerts"]["local_altitude"])
     else:
         local_altitude = 12000
-    if 'local_distance' in config['alerts']:
-        local_distance = int(config['alerts']['local_distance'])
+    if "local_distance" in config["alerts"]:
+        local_distance = int(config["alerts"]["local_distance"])
     else:
         local_distance = 30
 
@@ -199,6 +241,7 @@ def update_plane(
             "pragma mmap_size = 30000000000;",
             "CREATE INDEX icao_day_idx ON plane_days(icao);",
             "CREATE INDEX plane_day_idx ON plane_days(day);",
+            "CREATE INDEX plane_ident_idx ON plane_days(ident);",
             "CREATE INDEX icao_idx ON planes(icao);",
             "CREATE INDEX ptype_idx ON planes(ptype);",
             "pragma optimize;",
@@ -294,9 +337,16 @@ def update_plane(
                     icao,
                 ),
             )
-            if ptype in local_types and (icao, today) not in alerted and altitude < local_altitude and distance < local_distance:
+            if (
+                ptype in local_types
+                and (icao, today) not in alerted
+                and altitude < local_altitude
+                and distance < local_distance
+            ):
                 alerted[(icao, today)] = 1
-                logger.info(f"Local Alert: {icao} t:{ptype} d:{distance} alt:{altitude} id:{ident} site:{site}")
+                logger.info(
+                    f"Local Alert: {icao} t:{ptype} d:{distance} alt:{altitude} id:{ident} site:{site}"
+                )
                 play_sound("/Users/yantisj/dev/ads-db/sounds/ding.mp3")
 
         except TypeError as e:
@@ -307,33 +357,87 @@ def update_plane(
 
 
 def update_plane_day(
-    icao, ident, squawk, ptype, distance, altitude, heading, speed, reg
+    icao, ident, squawk, ptype, distance, altitude, heading, speed, reg, category
 ):
+    "Store planes per day. If callsign is True, store each ident per plane per day"
 
     now = datetime.now()
     now_date = datetime.now().date()
 
+    if not ident:
+        logger.debug(f"no ident, returning: {icao}")
+        return
+
+    signs = get_call_signs()
+
+    # Track all flights instead of just plane days
+    if (
+        "flights" in config
+        and "all_flights" in config["flights"]
+        and config["flights"]["all_flights"] in ["True", "true", "1"]
+    ):
+        call_sign = True
+    else:
+        call_sign = False
+
+    for sign in signs:
+        if re.search(f"^{sign}", ident):
+            call_sign = True
+
     try:
         cur = conn.cursor()
-        cur.execute(
-            "SELECT * FROM plane_days WHERE icao=? and day = ?",
-            (
-                icao,
-                now_date,
-            ),
-        )
-        rows = cur.fetchall()
+        if call_sign:
+
+            cur.execute(
+                "SELECT * FROM plane_days WHERE icao = ? and day = ? and ident = ?",
+                (
+                    icao,
+                    now_date,
+                    ident,
+                ),
+            )
+            rows = cur.fetchall()
+            # print(icao, ident, now_date, rows)
+        else:
+            cur.execute(
+                "SELECT * FROM plane_days WHERE icao=? and day = ?",
+                (
+                    icao,
+                    now_date,
+                ),
+            )
+            rows = cur.fetchall()
     except sqlite3.OperationalError as e:
         logger.warning(f"DB Load Error: {e}")
         return
 
     # print(f'ic:{icao}, ident:{ident}, sq:{squawk}, pt:{ptype}, dist:{distance}, alt:{altitude}, head:{heading}, spd:{speed}')
     if not rows:
-        logger.debug(
-            f"new plane day: {now_date} {icao} t:{ptype} id:{ident} alt:{altitude}"
-        )
+        cur = conn.cursor()
+        if call_sign:
+            logger.debug(
+                f"Todays Flight {ident} ({ptype}): {now_date} {icao} alt:{altitude}"
+            )
+        else:
+            logger.debug(
+                f"Todays Plane  {ident} ({ptype}): {now_date} {icao} alt:{altitude}"
+            )
+
         sql = """INSERT INTO plane_days(icao,day,ident,speed,altitude,lowest_altitude,distance,closest,heading,firstseen,lastseen)
               VALUES(?,?,?,?,?,?,?,?,?,?,?) """
+        # print(
+        #         icao,
+        #         now_date,
+        #         ident,
+        #         speed,
+        #         altitude,
+        #         altitude,
+        #         distance,
+        #         distance,
+        #         heading,
+        #         now,
+        #         now,
+        #     )
         cur.execute(
             sql,
             (
@@ -352,6 +456,7 @@ def update_plane_day(
         )
     else:
         try:
+            cur = conn.cursor()
             row = rows[0]
             low_dist = row[4]
             if not low_dist and distance:
@@ -365,35 +470,222 @@ def update_plane_day(
             elif altitude and altitude < low_alt:
                 # print('New Low Altitude', icao, altitude)
                 low_alt = altitude
+
+            # Use Cache ident
             nident = row[2]
+            if ident and nident != ident:
+                logger.info(f"Day Ident mismatch (Flight?): {ident}  <-> {nident}")
             if ident:
                 nident = ident
+            elif not nident:
+                print("No ident!", nident, icao)
             nsquawk = row[9]
             if squawk:
                 nsquawk = squawk
-            sql = """UPDATE plane_days SET ident = ?, squawk =?, speed = ?, altitude = ?, lowest_altitude = ?, distance = ?, closest = ?, heading = ?, lastseen = ?
-                WHERE icao = ? AND day = ?"""
-            cur.execute(
-                sql,
-                (
-                    nident,
-                    nsquawk,
-                    speed,
-                    altitude,
-                    low_alt,
-                    distance,
-                    low_dist,
-                    heading,
-                    now,
-                    icao,
-                    now_date,
-                ),
-            )
+            if call_sign:
+                sql = """UPDATE plane_days SET squawk =?, speed = ?, altitude = ?, lowest_altitude = ?, distance = ?, closest = ?, heading = ?, lastseen = ?
+                    WHERE icao = ? AND ident = ? AND day = ?"""
+                cur.execute(
+                    sql,
+                    (
+                        nsquawk,
+                        speed,
+                        altitude,
+                        low_alt,
+                        distance,
+                        low_dist,
+                        heading,
+                        now,
+                        icao,
+                        nident,
+                        now_date,
+                    ),
+                )
+            else:
+                sql = """UPDATE plane_days SET ident = ?, squawk =?, speed = ?, altitude = ?, lowest_altitude = ?, distance = ?, closest = ?, heading = ?, lastseen = ?
+                    WHERE icao = ? AND day = ?"""
+                cur.execute(
+                    sql,
+                    (
+                        nident,
+                        nsquawk,
+                        speed,
+                        altitude,
+                        low_alt,
+                        distance,
+                        low_dist,
+                        heading,
+                        now,
+                        icao,
+                        now_date,
+                    ),
+                )
         except TypeError as e:
             logger.critical(
                 f"Error updating plane: {icao} t:{ptype} id:{ident} alt:{altitude}: {e}"
             )
             pass
+
+
+def update_flight(
+    flight,
+    icao,
+    ptype,
+    distance,
+    altitude,
+    speed,
+    squawk,
+    heading,
+    reg,
+    category,
+):
+
+    if not flight:
+        print("no flight, returning", icao)
+        return
+
+    alert_flights = []
+
+    signs = get_call_signs()
+
+    # Track all flights instead of just plane days
+    if (
+        "flights" in config
+        and "all_flights" in config["flights"]
+        and config["flights"]["all_flights"] in ["True", "true", "1"]
+    ):
+        call_sign = True
+    else:
+        call_sign = False
+
+    for sign in signs:
+        if re.search(f"^{sign}", flight):
+            call_sign = True
+    if not call_sign:
+        if (flight, 'tracking') not in alerted:
+            alerted[(flight, 'tracking')] = 1
+            logger.debug(f"Tracking not enabled for this flight: {flight}")
+        return
+
+    now = datetime.now()
+    today = date.today()
+
+    try:
+        cur = conn.cursor()
+        cur.execute("SELECT count(1) FROM flights WHERE flight=?", (flight,))
+        count = cur.fetchall()[0][0]
+        if count:
+            rows = dict_gen(
+                cur.execute("SELECT * FROM flights WHERE flight=?", (flight,))
+            )
+        else:
+            rows = None
+    except sqlite3.OperationalError as e:
+        logger.warning(f"New Database: Trying to create DB: {e}")
+
+        create_table(conn, sql_create_flights_table)
+
+        # Setup indexes and initial DB
+        commands = [
+            "CREATE INDEX flights_flight_idx ON flights(flight);",
+            "CREATE INDEX flights_icao_idx ON flights(icao);",
+        ]
+        for cmd in commands:
+            print("DB Setup:", cmd)
+            res = cur.execute(cmd)
+
+        return
+
+    # print(f'ic:{icao}, ident:{ident}, sq:{squawk}, pt:{ptype}, dist:{distance}, alt:{altitude}, head:{heading}, spd:{speed}')
+    if not rows:
+        if flight in alert_flights:
+            logger.warning(
+                f"New Flight {flight} ({ptype})!: {reg} alt:{altitude} {icao}"
+            )
+            play_sound("/Users/yantisj/dev/ads-db/sounds/ding.mp3")
+            time.sleep(0.5)
+            play_sound("/Users/yantisj/dev/ads-db/sounds/ding.mp3")
+        else:
+            logger.info(f"New Flight {flight} ({ptype}): {reg} alt:{altitude} {icao}")
+        sql = """INSERT INTO flights(flight,icao,ptype,distance,closest,altitude,lowest_altitude,speed,lowest_speed,squawk,heading,registration,firstseen,lastseen)
+              VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?) """
+        cur.execute(
+            sql,
+            (
+                flight,
+                icao,
+                ptype,
+                distance,
+                distance,
+                altitude,
+                altitude,
+                speed,
+                speed,
+                squawk,
+                heading,
+                reg,
+                now,
+                now,
+            ),
+        )
+    else:
+        for row in rows:
+            try:
+                # print('updating icao', icao, flight)
+
+                low_dist = row["closest"]
+                if not low_dist and distance:
+                    low_dist = distance
+                elif distance and distance < low_dist:
+                    # print('New Low Distance', icao, distance)
+                    low_dist = distance
+                low_alt = row["lowest_altitude"]
+                if not low_alt and altitude:
+                    low_alt = altitude
+                elif altitude and altitude < low_alt:
+                    # print('New Low Altitude', icao, altitude)
+                    low_alt = altitude
+                low_speed = row["lowest_speed"]
+                if not low_speed and speed:
+                    low_speed = speed
+                elif speed and speed < low_speed:
+                    # print('New Low speed', icao, altitude)
+                    low_speed = speed
+                nsquawk = row["squawk"]
+                if squawk:
+                    nsquawk = squawk
+
+                sql = """UPDATE flights SET icao=?, ptype=?, distance=?, closest=?, altitude=?, lowest_altitude=?, speed=?, lowest_speed=?, squawk=?, heading=?, registration=?, lastseen=?
+                    WHERE flight = ? """
+                cur.execute(
+                    sql,
+                    (
+                        icao,
+                        ptype,
+                        distance,
+                        low_dist,
+                        altitude,
+                        low_alt,
+                        speed,
+                        low_speed,
+                        nsquawk,
+                        heading,
+                        reg,
+                        now,
+                        flight,
+                    ),
+                )
+                # if ptype in local_flights and (icao, today) not in alerted and altitude < local_altitude and distance < local_distance:
+                #     alerted[(icao, today)] = 1
+                #     logger.info(f"Local Alert: {icao} t:{ptype} d:{distance} alt:{altitude} id:{ident} site:{site}")
+                #     play_sound("/Users/yantisj/dev/ads-db/sounds/ding.mp3")
+                break
+
+            except TypeError as e:
+                logger.critical(
+                    f"Error updating plane: {icao} t:{ptype} id:{flight} alt:{altitude}: {e}"
+                )
+                pass
 
 
 def update_ptype(ptype, icao, mfr, model):
@@ -410,7 +702,6 @@ def update_ptype(ptype, icao, mfr, model):
         cur.execute(sql, (ptype, icao, now, now, 1, mfr, model))
     else:
         row = rows[0]
-        logger.debug(f"Updating ptype: {ptype}")
         cur.execute("SELECT * FROM planes WHERE ptype = ?", (ptype,))
         rows = cur.fetchall()
         pcount = 0
@@ -548,19 +839,35 @@ def print_plane_days(rows):
 
     total = 0
     print("")
-    print("IACO   IDENT        DST MIN  ALT     LOW     FIRST                 LAST")
     print(
-        "----   ----         --- ---  -----   -----   -------------------   -------------------"
+        "IACO   TYPE  REG      FLIGHT       DST MIN  ALT     LOW     FIRST                 LAST"
     )
+    print(
+        "----   ----  -------  -------      --- ---  -----   -----   -------------------   -------------------"
+    )
+
+    cur = conn.cursor()
+
+    ptypes = dict()
+
     for row in rows:
         total += 1
+
+        if row[0] not in ptypes:
+            cur.execute(
+                "SELECT ptype, registration from planes where icao = ?", (row[0],)
+            )
+            (ptype, reg) = cur.fetchone()
+            ptypes[row[0]] = (ptype, reg)
+        else:
+            (ptype, reg) = ptypes[row[0]]
+
         altitude = 0
         alt_low = 0
         distance = 0
         closest = 0
         country = ""
         owner = ""
-        reg = ""
         mlt = ""
         day_count = 1
         cat = ""
@@ -576,10 +883,36 @@ def print_plane_days(rows):
         if row[6]:
             alt_low = int(row[6])
         print(
-            f"{row[0]:<5} {row[2]:<12} {distance:<3} {closest:<4} {altitude:<7} {alt_low:<7} {first:<10}   {last:<10}"
+            f"{row[0]:<6} {ptype:<5} {reg:<8} {row[2]:<12} {distance:<3} {closest:<4} {altitude:<7} {alt_low:<7} {first:<10}   {last:<10}"
         )
 
     return total
+
+
+def print_flights(rows):
+
+    print(
+        "\nFLIGHT#   PTYPE  REGISTR    ICAO    CT  DST MIN  ALT     LOW     FIRST                 LAST"
+    )
+    print(
+        "-------   ----   --------   ------  --- --- ---  -----   -----   --------------------  -------------------"
+    )
+
+    day_count = 0
+    count = 0
+    for r in rows:
+        count += 1
+        distance = int(r["distance"])
+        closest = int(r["closest"])
+        altitude = int(r["altitude"])
+        lowest_altitude = int(r["lowest_altitude"])
+        first = str(r["firstseen"]).split(".")[0]
+        last = str(r["lastseen"]).split(".")[0]
+        print(
+            f"{r['flight']:<9} {r['ptype']:<5}  {r['registration']:<8}   {r['icao']:<6}  {day_count:<3} {distance:<3} {closest:<4} {altitude:<7} {lowest_altitude:<7} {first:<10}   {last:<10}"
+        )
+
+    return count
 
 
 def lookup_ptypes(ptype, hours=0, mfr=None):
@@ -626,6 +959,24 @@ def lookup_ptypes(ptype, hours=0, mfr=None):
 
     if total > 1:
         print(f"\nAircraft Types: {total} / Total Aircraft: {planes}")
+
+
+def lookup_flight(flight, hours=0):
+
+    cur = conn.cursor()
+    rows = dict_gen(
+        cur.execute(
+            "SELECT * FROM flights WHERE flight LIKE ? ORDER BY lastseen DESC",
+            (flight,),
+        )
+    )
+    total = print_flights(rows)
+    if total == 1:
+        cur.execute(
+            "SELECT * FROM plane_days WHERE ident = ? ORDER BY lastseen DESC", (flight,)
+        )
+        rows = cur.fetchall()
+        print_plane_days(rows)
 
 
 def lookup_icao(icao):
@@ -848,6 +1199,13 @@ def get_db_stats():
     day_ago = datetime.now() - timedelta(days=1)
 
     rows = cur.fetchall()
+
+    cur.execute(
+        'SELECT flight,ptype,lastseen "[timestamp]", firstseen "[timestamp]" FROM flights ORDER BY lastseen ASC'
+    )
+
+    all_flights = cur.fetchall()
+
     types = defaultdict(int)
     ttypes = dict()
     ttypes_day = dict()
@@ -887,18 +1245,59 @@ def get_db_stats():
                 ttypes_new[ptype] = 1
                 type_count_new += 1
 
+    flights = defaultdict(int)
+    fflights = dict()
+    fflights_day = dict()
+    fflights_new = dict()
+    fflights_old = dict()
+    ftotal = 0
+    ftotal_day = 0
+    ftotal_new = 0
+    flight_count = 0
+    flight_count_day = 0
+    flight_count_new = 0
+
+    for row in all_flights:
+        ftotal += 1
+        last_seen = str(row[2]).split(".")[0]
+
+        icao = row[0]
+        ptype = row[1]
+        flights["TOTL"] += 1
+        flights[ptype] += 1
+        if ptype not in fflights:
+            fflights[ptype] = 1
+            flight_count += 1
+            flights["TYPE"] = type_count
+        if row[3] < day_ago:
+            if ptype not in fflights_old:
+                fflights_old[ptype] = 1
+        if row[2] > day_ago:
+            ftotal_day += 1
+            if ptype not in fflights_day:
+                fflights_day[ptype] = 1
+                flight_count_day += 1
+        if row[3] > day_ago:
+            ftotal_new += 1
+            if ptype not in fflights_new and ptype not in fflights_old and ptype:
+                fflights_new[ptype] = 1
+                flight_count_new += 1
+
     sort_types = OrderedDict(sorted(types.items(), key=itemgetter(1), reverse=True))
     tcount = 0
     # for en in sort_types:
     #     tcount += 1
     #     if tcount < 10:
     #         print(en, sort_types[en])
-    print(f"\n ADS-DB Plane Stats     [{last_seen}]")
-    print("=============================================")
+    print(f"\n ADS-DB Stats           [{last_seen}]")
+    print("==============================================")
     print(
-        f" Plane Types:  {type_count:<5}  24hrs: {type_count_day:<3}    New: {type_count_new:<3}"
+        f" Flight Numbers: {flight_count:<5}  24hrs: {flight_count_day:<3}    New: {flight_count_new:<3}"
     )
-    print(f" Plane Totals: {total:<5}  24hrs: {total_day:<4}   New: {total_new:<4}")
+    print(
+        f" Hull Classes:   {type_count:<5}  24hrs: {type_count_day:<3}    New: {type_count_new:<3}"
+    )
+    print(f" Total Planes:   {total:<5}  24hrs: {total_day:<4}   New: {total_new:<4}")
     print()
     return types
 
@@ -926,6 +1325,20 @@ def dict_gen(curs):
             return
         for row in rows:
             yield dict(zip(field_names, row))
+
+
+def get_call_signs():
+    "merge all call signs"
+
+    if "flights" in config and "all_call_signs" in config["flights"]:
+        signs = config["flights"]["call_signs"].split(",")
+    else:
+        signs = STATIC_CALL_SIGNS
+    
+    if "flights" in config and "extra_call_signs" in config['flights']:
+        for sign in config['flights']['extra_call_signs'].split(','):
+            signs.append(sign)
+    return signs
 
 
 def update_missing_data():
@@ -1139,6 +1552,7 @@ def run_daemon(refresh=10, sites=["127.0.0.1"]):
     # option = webdriver.ChromeOptions()
     # option.add_argument(" — incognito")
     # browser = webdriver.Chrome(executable_path='/Users/yantisj/dev/arbitragerx/venv/bin/chromedriver', chrome_options=option)
+
     timeout = 20
     cdict_counter = 10
     plane_count = 0
@@ -1150,7 +1564,6 @@ def run_daemon(refresh=10, sites=["127.0.0.1"]):
         plane_count = 0
         for site in sites:
             try:
-                logger.debug(f"Updating aircraft.json: {site}")
                 r = requests.get(
                     f"http://{site}/dump1090-fa/data/aircraft.json", timeout=5
                 )
@@ -1240,17 +1653,33 @@ def run_daemon(refresh=10, sites=["127.0.0.1"]):
                                         "/Users/yantisj/dev/ads-db/sounds/warntwo.mp3"
                                     )
 
-                        update_plane_day(
-                            icao,
-                            flight,
-                            squawk,
-                            ptype,
-                            distance,
-                            altitude,
-                            heading,
-                            speed,
-                            reg,
-                        )
+                        # Plane days and flight tracking require ident set
+                        if flight:
+                            update_flight(
+                                flight,
+                                icao,
+                                ptype,
+                                distance,
+                                altitude,
+                                speed,
+                                squawk,
+                                heading,
+                                reg,
+                                category,
+                            )
+                            # Only update plane_days if flight info
+                            update_plane_day(
+                                icao,
+                                flight,
+                                squawk,
+                                ptype,
+                                distance,
+                                altitude,
+                                heading,
+                                speed,
+                                reg,
+                                category,
+                            )
                         update_plane(
                             icao,
                             flight,
@@ -1349,9 +1778,6 @@ def read_config(config_file):
 
     config = configparser.ConfigParser()
     config.read(config_file)
-    if config["alerts"]["sounds"] in ["true", "True", "1"] and not sounds:
-        logger.info("Enabling Sounds")
-        sounds = True
     return config
 
 
@@ -1368,18 +1794,17 @@ check_quiet_time()
 
 parser = argparse.ArgumentParser(description="Save ADSB Data to SQLite")
 parser.add_argument("-D", action="store_true", help="Run Daemon")
-parser.add_argument("-st", action="store_true", help="Database Stats")
 parser.add_argument(
     "-rs", type=str, help="Receiver IP List separated by commas (default 127.0.0.1)"
 )
-parser.add_argument("-rf", type=int, help="Refresh Interval (default 10sec)")
-parser.add_argument("-db", type=str, help="Different Database File")
-parser.add_argument("-lt", type=str, help="Lookup Planes by Type")
+parser.add_argument("-st", action="store_true", help="Database Stats")
+parser.add_argument("-lf", type=str, help="Lookup Flights by Name (DAL%)")
+parser.add_argument("-lt", type=str, help="Lookup Planes by Type (B77%)")
 parser.add_argument(
     "-lts", type=str, help="Lookup Type Totals by type (use percent-sign for all type)"
 )
-parser.add_argument("-li", type=str, help="Lookup Planes by IACO")
-parser.add_argument("-ld", type=str, help="Lookup Planes by IDENT")
+parser.add_argument("-li", type=str, help="Lookup Plane by IACO")
+parser.add_argument("-ld", type=str, help="Lookup Planes by IDENT/Flight #s")
 parser.add_argument("-lr", type=str, help="Lookup Planes by Registration")
 parser.add_argument("-lm", type=str, help="Lookup Planes by Manufacturer")
 parser.add_argument("-af", type=str, help="Alert on Flight Name / ICAO")
@@ -1392,10 +1817,12 @@ parser.add_argument("-fc0", action="store_true", help="Filter A0 no categories")
 parser.add_argument("-fm", action="store_true", help="Filter Military Planes")
 parser.add_argument("-fh", type=float, help="Filter by hours since seen")
 parser.add_argument("-fd", type=int, help="Filter by Days Seen Above Count")
+parser.add_argument("-S", action="store_true", help="Play Sounds")
+parser.add_argument("-rf", type=int, help="Refresh Interval (default 10sec)")
+parser.add_argument("-db", type=str, help="Different Database File")
 parser.add_argument(
     "-sc", type=int, help="Save Cycle (increase > 10 to reduce disk writes)"
 )
-parser.add_argument("-S", action="store_true", help="Play Sounds")
 parser.add_argument("-v", action="store_true", help="Debug Mode")
 parser.add_argument(
     "--update_db", action="store_true", help="Update all planes with latest DB info"
@@ -1444,6 +1871,10 @@ elif args.cleanup_db:
 
 elif args.D:
     load_fadb()
+
+    if config["alerts"]["sounds"] in ["true", "True", "1"] and not sounds:
+        logger.info("Enabling Sounds")
+        sounds = True
 
     sites = ["127.0.0.1"]
     refresh = 10
@@ -1498,6 +1929,14 @@ elif args.lts:
     if args.fh:
         hours = args.fh
     lookup_ptypes(args.lts, hours=hours)
+elif args.lf:
+    hours = 0
+    if args.lf:
+        hours = args.lf
+    lookup_flight(
+        args.lf,
+        hours=hours,
+    )
 elif args.lm:
     hours = 0
     if args.fh:

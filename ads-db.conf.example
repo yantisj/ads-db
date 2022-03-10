@@ -1,14 +1,34 @@
+## ADS-DB Config Files
 [global]
 lat = 32.7800
 lon = -79.9400
 
-# Alert and play sounds for different planes and events
+
+## Database files (need updating)
+[db]
+base_station = sqb/BaseStation.sqb
+
+
+## Flight tracking is restricted to known commercial flights by default
+[flights]
+# Add call signs not in the default system (example)
+extra_call_signs = LJX,JTZ
+
+## Uncomment to control tracked call signs -> flights locally
+# all_call_signs = DAL,SWA,RPA,UAL,AAL,JBU,FFT,MXY,NKS,JIA,FDX,UPS,ACA
+
+# Track all flights by default (noisy)
+all_flights = false
+
+
+## Play sounds for different planes and events
 [alerts]
 sounds = false
 new_planes = B789,B78X
 landing = false
 boeing = false
 
-# Database files that need updating occasionally
-[db]
-base_station = sqb/BaseStation.sqb
+## Alert on planes in the area
+# local_planes = B789
+# local_altitude = 12000
+# local_distance = 30
