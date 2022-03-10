@@ -53,7 +53,7 @@ STATIC_CALL_SIGNS = [
     "ROU",
     "VOC",
     "ICE",
-
+    "AAY",
 ]
 
 # Create tables if they don't exist
@@ -474,7 +474,9 @@ def update_plane_day(
             # Use Cache ident
             nident = row[2]
             if ident and nident != ident:
-                logger.info(f"Day Ident mismatch (Flight?): {ident}  <-> {nident}")
+                if ident not in alerted:
+                    alerted[ident] = 1
+                    logger.info(f"Day Ident mismatch (Flight?): {ident}  <-> {nident}")
             if ident:
                 nident = ident
             elif not nident:
@@ -835,7 +837,7 @@ def print_planes(rows):
     return total
 
 
-def print_plane_days(rows):
+def print_plane_days(rows, hours=0):
 
     total = 0
     print("")
@@ -846,13 +848,18 @@ def print_plane_days(rows):
         "----   ----  -------  -------      --- ---  -----   -----   -------------------   -------------------"
     )
 
+    hours_ago = None
+    if hours:
+        hours_ago = datetime.now() - timedelta(hours=hours)
+
     cur = conn.cursor()
 
     ptypes = dict()
 
     for row in rows:
         total += 1
-
+        if hours_ago and row[12] < hours_ago:
+            continue
         if row[0] not in ptypes:
             cur.execute(
                 "SELECT ptype, registration from planes where icao = ?", (row[0],)
@@ -889,7 +896,7 @@ def print_plane_days(rows):
     return total
 
 
-def print_flights(rows):
+def print_flights(rows, hours=0, low_alt=0):
 
     print(
         "\nFLIGHT#   PTYPE  REGISTR    ICAO    CT  DST MIN  ALT     LOW     FIRST                 LAST"
@@ -898,9 +905,17 @@ def print_flights(rows):
         "-------   ----   --------   ------  --- --- ---  -----   -----   --------------------  -------------------"
     )
 
+    hours_ago = None
+    if hours:
+        hours_ago = datetime.now() - timedelta(hours=hours)
+
     day_count = 0
     count = 0
     for r in rows:
+        if hours_ago and r["lastseen"] < hours_ago:
+            continue
+        if low_alt and r["lowest_altitude"] > low_alt:
+            continue
         count += 1
         distance = int(r["distance"])
         closest = int(r["closest"])
@@ -961,7 +976,7 @@ def lookup_ptypes(ptype, hours=0, mfr=None):
         print(f"\nAircraft Types: {total} / Total Aircraft: {planes}")
 
 
-def lookup_flight(flight, hours=0):
+def lookup_flight(flight, hours=0, low_alt=0):
 
     cur = conn.cursor()
     rows = dict_gen(
@@ -970,13 +985,13 @@ def lookup_flight(flight, hours=0):
             (flight,),
         )
     )
-    total = print_flights(rows)
+    total = print_flights(rows, hours=hours, low_alt=low_alt)
     if total == 1:
         cur.execute(
             "SELECT * FROM plane_days WHERE ident = ? ORDER BY lastseen DESC", (flight,)
         )
         rows = cur.fetchall()
-        print_plane_days(rows)
+        print_plane_days(rows, hours=hours)
 
 
 def lookup_icao(icao):
@@ -1197,6 +1212,7 @@ def get_db_stats():
     )
 
     day_ago = datetime.now() - timedelta(days=1)
+    month_ago = datetime.now() - timedelta(days=30)
 
     rows = cur.fetchall()
 
@@ -1209,13 +1225,16 @@ def get_db_stats():
     types = defaultdict(int)
     ttypes = dict()
     ttypes_day = dict()
+    ttypes_mon = dict()
     ttypes_new = dict()
     ttypes_old = dict()
     total = 0
     total_day = 0
+    total_mon = 0
     total_new = 0
     type_count = 0
     type_count_day = 0
+    type_count_mon = 0
     type_count_new = 0
     last_seen = ""
 
@@ -1239,6 +1258,11 @@ def get_db_stats():
             if ptype not in ttypes_day:
                 ttypes_day[ptype] = 1
                 type_count_day += 1
+        if row[2] > month_ago:
+            total_mon += 1
+            if ptype not in ttypes_mon:
+                ttypes_mon[ptype] = 1
+                type_count_mon += 1
         if row[3] > day_ago:
             total_new += 1
             if ptype not in ttypes_new and ptype not in ttypes_old and ptype:
@@ -1248,39 +1272,46 @@ def get_db_stats():
     flights = defaultdict(int)
     fflights = dict()
     fflights_day = dict()
+    fflights_mon = dict()
     fflights_new = dict()
     fflights_old = dict()
     ftotal = 0
     ftotal_day = 0
+    ftotal_mon = 0
     ftotal_new = 0
     flight_count = 0
     flight_count_day = 0
+    flight_count_mon = 0
     flight_count_new = 0
 
     for row in all_flights:
         ftotal += 1
         last_seen = str(row[2]).split(".")[0]
 
-        icao = row[0]
-        ptype = row[1]
+        flight = row[0]
         flights["TOTL"] += 1
-        flights[ptype] += 1
-        if ptype not in fflights:
-            fflights[ptype] = 1
+        flights[flight] += 1
+        if flight not in fflights:
+            fflights[flight] = 1
             flight_count += 1
-            flights["TYPE"] = type_count
+            flights[icao] = type_count
         if row[3] < day_ago:
-            if ptype not in fflights_old:
-                fflights_old[ptype] = 1
+            if flight not in fflights_old:
+                fflights_old[flight] = 1
         if row[2] > day_ago:
             ftotal_day += 1
-            if ptype not in fflights_day:
-                fflights_day[ptype] = 1
+            if flight not in fflights_day:
+                fflights_day[flight] = 1
                 flight_count_day += 1
+        if row[2] > month_ago:
+            ftotal_mon += 1
+            if flight not in fflights_mon:
+                fflights_mon[flight] = 1
+                flight_count_mon += 1
         if row[3] > day_ago:
             ftotal_new += 1
-            if ptype not in fflights_new and ptype not in fflights_old and ptype:
-                fflights_new[ptype] = 1
+            if flight not in fflights_new and flight not in fflights_old and flight:
+                fflights_new[flight] = 1
                 flight_count_new += 1
 
     sort_types = OrderedDict(sorted(types.items(), key=itemgetter(1), reverse=True))
@@ -1289,15 +1320,15 @@ def get_db_stats():
     #     tcount += 1
     #     if tcount < 10:
     #         print(en, sort_types[en])
-    print(f"\n ADS-DB Stats           [{last_seen}]")
-    print("==============================================")
+    print(f"\n ADS-DB Stats                             [{last_seen}]")
+    print("================================================================")
     print(
-        f" Flight Numbers: {flight_count:<5}  24hrs: {flight_count_day:<3}    New: {flight_count_new:<3}"
+        f" Flight Numbers: {flight_count:<6}  30days: {flight_count_mon:<6,}  24hrs: {flight_count_day:<6,} New: {flight_count_new:<3}"
     )
     print(
-        f" Hull Classes:   {type_count:<5}  24hrs: {type_count_day:<3}    New: {type_count_new:<3}"
+        f" Hull Classes:   {type_count:<6}  30days: {type_count_mon:<6,}  24hrs: {type_count_day:<6} New: {type_count_new:<3}"
     )
-    print(f" Total Planes:   {total:<5}  24hrs: {total_day:<4}   New: {total_new:<4}")
+    print(f" Total Planes:   {total:<6,}  30days: {total_mon:<6,}  24hrs: {total_day:<6,} New: {total_new:<4}")
     print()
     return types
 
@@ -1891,6 +1922,7 @@ elif args.D:
         conn.commit()
 elif args.st:
     get_db_stats()
+    exit()
 
 elif args.lt:
     count = 0
@@ -1931,11 +1963,15 @@ elif args.lts:
     lookup_ptypes(args.lts, hours=hours)
 elif args.lf:
     hours = 0
-    if args.lf:
-        hours = args.lf
+    low_alt = 0
+    if args.fh:
+        hours = args.fh
+    if args.fa:
+        low_alt = args.fa
     lookup_flight(
         args.lf,
         hours=hours,
+        low_alt=low_alt
     )
 elif args.lm:
     hours = 0

@@ -10,11 +10,11 @@ The database has been in testing for 3 years and can scale to tens of thousands 
 
 ## Database Summary
 ```
- ADS-DB Stats           [2022-03-09 20:39:20]
+ ADS-DB Stats           [2022-03-09 21:16:36]
 ==============================================
- Flight Numbers: 31     24hrs: 31     New: 31
+ Flight Numbers: 259    24hrs: 259    New: 259
  Hull Classes:   543    24hrs: 151    New: 0
- Total Planes:   31524  24hrs: 1635   New: 73
+ Total Planes:   31525  24hrs: 1650   New: 73
 ```
 
 ## Command Help
