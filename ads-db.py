@@ -55,6 +55,8 @@ STATIC_CALL_SIGNS = [
     "ICE",
     "AAY",
     "EDV",
+    "AJT",
+
 ]
 
 # Create tables if they don't exist
@@ -605,13 +607,13 @@ def update_flight(
     if not rows:
         if flight in alert_flights:
             logger.warning(
-                f"New Flight {flight} ({ptype})!: {reg} alt:{altitude} {icao}"
+                f"New Flight {flight:<7} ({ptype})!!: {reg:<6} alt:{altitude:<5} {icao}"
             )
             play_sound("/Users/yantisj/dev/ads-db/sounds/ding.mp3")
             time.sleep(0.5)
             play_sound("/Users/yantisj/dev/ads-db/sounds/ding.mp3")
         else:
-            logger.info(f"New Flight {flight} ({ptype}): {reg} alt:{altitude} {icao}")
+            logger.info(f"New Flight {flight:<7} ({ptype}): {reg:<6} alt:{altitude:<5} {icao}")
         sql = """INSERT INTO flights(flight,icao,ptype,distance,closest,altitude,lowest_altitude,speed,lowest_speed,squawk,heading,registration,firstseen,lastseen)
               VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?) """
         cur.execute(
@@ -1118,7 +1120,7 @@ def alert_landing(
                 if (icao, ident, today) not in alerted:
                     alerted[(icao, ident, today)] = 1
                     logger.warning(
-                        f"!! Landing Alert !!: {icao} {ident} {ptype} {category} d:{distance} h:{heading} s:{speed} a:{altitude} lat:{lat} lon:{lon}"
+                        f"!! Landing Alert {ident:>7} ({ptype}) !!: {category} {icao} d:{distance} h:{heading} s:{speed} a:{altitude} lat:{lat} lon:{lon}"
                     )
                     if sounds and check_quiet_time():
                         play_sound("/Users/yantisj/dev/ads-db/sounds/ding-low.mp3")
@@ -1197,7 +1199,7 @@ def alert_ident(ident, sites=["127.0.0.1"], min_distance=0):
                         distance = round(distance * 0.621371, 1)
                     if flight == ident or icao == ident:
                         if not min_distance or distance < min_distance:
-                            logger.info(f"Located Plane: {ident} from {site}")
+                            logger.warning(f"Located Plane!!: {ident} from {site}")
                             lookup_icao(icao)
                             play_sound("/Users/yantisj/dev/ads-db/sounds/ding.mp3")
                             time.sleep(5)
@@ -1317,21 +1319,15 @@ def get_db_stats():
                 fflights_new[flight] = 1
                 flight_count_new += 1
 
-    sort_types = OrderedDict(sorted(types.items(), key=itemgetter(1), reverse=True))
-    tcount = 0
-    # for en in sort_types:
-    #     tcount += 1
-    #     if tcount < 10:
-    #         print(en, sort_types[en])
     print(f"\n ADS-DB Stats                             [{last_seen}]")
     print("================================================================")
     print(
-        f" Flight Numbers: {flight_count:<6}  30days: {flight_count_mon:<6,}  24hrs: {flight_count_day:<6,} New: {flight_count_new:<3}"
+        f" Flight Numbers: {flight_count:<6,}  30days: {flight_count_mon:<6,} 24hrs: {flight_count_day:<6,} New: {flight_count_new:<3}"
     )
     print(
-        f" Hull Classes:   {type_count:<6}  30days: {type_count_mon:<6,}  24hrs: {type_count_day:<6} New: {type_count_new:<3}"
+        f" Hull Classes:   {type_count:<6,}  30days: {type_count_mon:<6,} 24hrs: {type_count_day:<6} New: {type_count_new:<3}"
     )
-    print(f" Total Planes:   {total:<6,}  30days: {total_mon:<6,}  24hrs: {total_day:<6,} New: {total_new:<4}")
+    print(f" Total Planes:   {total:<6,}  30days: {total_mon:<6,} 24hrs: {total_day:<6,} New: {total_new:<4}")
     print()
     return types
 
@@ -1342,7 +1338,7 @@ conn = None
 def check_quiet_time():
     now = datetime.now()
     # print('time now', now.hour)
-    if now.hour > 21 or now.hour < 9:
+    if now.hour > 21 or now.hour < 8:
         return False
 
     return True
@@ -1434,7 +1430,7 @@ def update_missing_data():
                 new = False
                 if not ptypes:
                     new = True
-                    logger.info(f"!! New Plane Type !!: {icao} t:{ptype} m:{model}")
+                    logger.warning(f"!! New Plane Type !!: {icao} t:{ptype} m:{model}")
                     sql = """INSERT INTO plane_types(ptype,last_icao,firstseen,lastseen,count,manufacturer,model)
                         VALUES(?,?,?,?,?,?,?) """
                     cur2.execute(sql, (ptype, icao, now, now, 1, mfr, model))
@@ -1735,7 +1731,7 @@ def run_daemon(refresh=10, sites=["127.0.0.1"]):
                             new = update_ptype(ptype, icao, mfr, model)
                             if new:
                                 logger.warning(
-                                    f"New Plane Type!!: {icao} {reg} {ptype} {flight} {country} {owner} d:{distance}"
+                                    f"New Plane Type ({ptype})!!: {model} {icao} {reg} {flight} {country} {owner} d:{distance}"
                                 )
                                 if sounds and check_quiet_time():
                                     play_sound(
