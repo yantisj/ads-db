@@ -1,9 +1,8 @@
 # ADS-DB Install and User Guide
 
 ## Benefits of ADS-DB
-Keep track of every plane/flight you're receiever has ever seen, so you can check for past activity in your area. Get alerted to when a specific plane is overhead or even landing at a nearby airport with approach detection. Keeps a record of each planes registration data, IDENT, and detailed plane information for each manufacturer for every plane your receiver detects for additional analysis and reporting.
+Keep track of every plane/flight you're receiever has ever seen, so you can check for past activity in your area. Get alerted to when a specific plane is overhead or even landing at a nearby airport with approach detection. Keeps a record of each plane's registration data, IDENT, and detailed plane information for each manufacturer for every plane your receiver detects for additional analysis and reporting.
 
-## Tell me more about ADS-DB?
 ADS-DB connects to one or more Piaware/dump1090-fa ADSB nodes and saves all planes and flights to a SQLite database for later analysis. ADS-DB records the first and last time a plane is seen, each day, along with the last known altitude, heading and other information. This program will also record and flag all military planes seen.
 
 The database has been in testing for 3 years and can scale to tens of thousands of planes. When new registration/plane data is released, you can backfill your database with all the latest registration data as it becomes available.
@@ -11,12 +10,11 @@ The database has been in testing for 3 years and can scale to tens of thousands 
 
 ## Database Summary
 ```
-ADS-DB Plane Stats
-----------------------------------------------
- Plane Types:  465    24hrs: 147    New: 0
- Plane Totals: 31433  24hrs: 1735   New: 80
-
-Last Activity: 2022-03-08 16:58:20
+ ADS-DB Stats           [2022-03-09 20:39:20]
+==============================================
+ Flight Numbers: 31     24hrs: 31     New: 31
+ Hull Classes:   543    24hrs: 151    New: 0
+ Total Planes:   31524  24hrs: 1635   New: 73
 ```
 
 ## Command Help
@@ -50,6 +48,21 @@ optional arguments:
 ```
 
 # Useful Examples
+
+### Flight lookup
+```
+ads -lf SWA1231
+
+FLIGHT#   PTYPE  REGISTR    ICAO    CT  DST MIN  ALT     LOW     FIRST                 LAST
+-------   ----   --------   ------  --- --- ---  -----   -----   --------------------  -------------------
+SWA1231   B38M   N8747Q     AC088E  0   48  48   38000   38000   2022-03-09 20:37:36   2022-03-09 20:40:00
+
+IACO   TYPE  REG      FLIGHT       DST MIN  ALT     LOW     FIRST                 LAST
+----   ----  -------  -------      --- ---  -----   -----   -------------------   -------------------
+AC088E B38M  N8747Q   SWA1231      48  48   38000   38000   2022-03-09 20:37:36   2022-03-09 20:40:00
+ABAAA8 B738  N8507C   SWA1231      118 108  40000   40000   2022-03-08 21:02:35   2022-03-08 21:10:30
+AAA668 B737  N7857B   SWA1231      108 104  38000   38000   2022-03-07 12:51:51   2022-03-07 20:47:06
+```
 
 ### Specific plane lookup by IACO (or registration/ident)
 ```
