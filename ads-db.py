@@ -35,6 +35,9 @@ cdict = defaultdict(int)
 lookup = None
 sounds = False
 
+# Holddown empty data for a few cycles
+holddown = defaultdict(int)
+
 STATIC_CALL_SIGNS = [
     "DAL",
     "SWA",
@@ -167,6 +170,46 @@ def create_connection(db_file):
         res = cur.execute(cmd)
     return conn
 
+def connect_ads_db(db_file):
+
+    conn_db = sqlite3.connect(
+        db_file,
+        detect_types=sqlite3.PARSE_DECLTYPES | sqlite3.PARSE_COLNAMES,
+    )
+
+    try:
+        cur = conn_db.cursor()
+        cur.execute("SELECT * FROM planes WHERE icao=?", ('1234',))
+        rows = cur.fetchall()
+    except sqlite3.OperationalError as e:
+        logger.warning(f"New Database: Trying to create DB: {e}")
+
+        create_table(conn_db, sql_create_planes_table)
+        create_table(conn_db, sql_create_types_table)
+        create_table(conn_db, sql_create_plane_days_table)
+        create_table(conn_db, sql_create_flights_table)
+
+
+        # Setup indexes and initial DB
+        commands = [
+            "pragma journal_mode = WAL;",
+            "pragma synchronous = normal;",
+            "pragma temp_store = memory;",
+            "pragma mmap_size = 30000000000;",
+            "CREATE INDEX icao_day_idx ON plane_days(icao);",
+            "CREATE INDEX plane_day_idx ON plane_days(day);",
+            "CREATE INDEX plane_ident_idx ON plane_days(ident);",
+            "CREATE INDEX icao_idx ON planes(icao);",
+            "CREATE INDEX ptype_idx ON planes(ptype);",
+            "CREATE INDEX flights_flight_idx ON flights(flight);",
+            "CREATE INDEX flights_icao_idx ON flights(icao);",
+        ]
+        logger.warning(f'Initializing Database: {db_file}')
+        for cmd in commands:
+            # print("DB Setup:", cmd)
+            res = cur.execute(cmd)
+
+    return conn_db
 
 def create_table(conn, create_table_sql):
     """create a table from the create_table_sql statement
@@ -175,7 +218,7 @@ def create_table(conn, create_table_sql):
     :return:
     """
     try:
-        print("Setup:", create_table_sql)
+        # print("Setup:", create_table_sql)
         c = conn.cursor()
         c.execute(create_table_sql)
     except Error as e:
@@ -215,6 +258,15 @@ def update_plane(
     today = date.today()
     global sounds
 
+    # Holddown up to five cycles while waiting for better data
+    if not ident and holddown[icao] < 5:
+        holddown[icao] += 1
+        return
+    # elif holddown[icao] and holddown[icao] <= 5:
+    #     print('EXIT holddown', holddown[icao], ident, icao, site)
+    # if ident and holddown[icao]:
+    #     holddown[icao] = 0
+
     # Play sounds on new versions of these aircraft
     alert_types = dict()
     if "new_planes" in config["alerts"]:
@@ -244,16 +296,15 @@ def update_plane(
         create_table(conn, sql_create_plane_days_table)
         # Setup indexes and initial DB
         commands = [
-            "pragma journal_mode = WAL;",
-            "pragma synchronous = normal;",
-            "pragma temp_store = memory;",
-            "pragma mmap_size = 30000000000;",
-            "CREATE INDEX icao_day_idx ON plane_days(icao);",
-            "CREATE INDEX plane_day_idx ON plane_days(day);",
-            "CREATE INDEX plane_ident_idx ON plane_days(ident);",
-            "CREATE INDEX icao_idx ON planes(icao);",
-            "CREATE INDEX ptype_idx ON planes(ptype);",
-            "pragma optimize;",
+            # "pragma journal_mode = WAL;",
+            # "pragma synchronous = normal;",
+            # "pragma temp_store = memory;",
+            # "pragma mmap_size = 30000000000;",
+            # "CREATE INDEX icao_day_idx ON plane_days(icao);",
+            # "CREATE INDEX plane_day_idx ON plane_days(day);",
+            # "CREATE INDEX plane_ident_idx ON plane_days(ident);",
+            # "CREATE INDEX icao_idx ON planes(icao);",
+            # "CREATE INDEX ptype_idx ON planes(ptype);",
         ]
         for cmd in commands:
             print("DB Setup:", cmd)
@@ -267,13 +318,13 @@ def update_plane(
         dist_int = int(distance)
         if ptype in alert_types:
             logger.warning(
-                f"NEW PLANE {model_str:>11} ({ptype:>4}) {category:<2}: {dist_int:>3}nm {flight_level:<5} {ident:<6} {reg} {country} {owner} {mfr} {icao} site:{site}"
+                f"NEW PLANE {model_str:>11} ({ptype:>4}) {category:<2} [{dist_int:>3}nm {flight_level:>5}] {ident:<7} {reg} {country} {owner} {mfr} {icao} site:{site}"
             )
             play_sound("/Users/yantisj/dev/ads-db/sounds/ding-high.mp3")
             play_sound("/Users/yantisj/dev/ads-db/sounds/ding-high.mp3")
         else:
             logger.info(
-                f"New Plane {model_str:>11} ({ptype:>4}) {category:<2}: {dist_int:>3}nm {flight_level:<5} {ident:<6} {reg} {country} {owner} {mfr} {icao} site:{site}"
+                f"New Plane {model_str:>11} ({ptype:>4}) {category:<2} [{dist_int:>3}nm {flight_level:>5}] {ident:<7} {reg} {country} {owner} {mfr} {icao} site:{site}"
             )
         sql = """INSERT INTO planes(icao,ident,ptype,speed,altitude,lowest_altitude,distance,closest,heading,firstseen,lastseen,registration,country,owner,military,day_count,category)
               VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) """
@@ -362,7 +413,7 @@ def update_plane(
                 alerted[(icao, today)] = 1
                 dist_int = int(distance)
                 logger.info(
-                    f"Local Alert! {ident:>8} ({ptype:<4}) {category:<2}: {dist_int:>3}nm {flight_level:<5} {ident:<6} {reg} {country} {owner} {mfr} {icao} site:{site}"
+                    f"Local Alert! {ident:>8} ({ptype:<4}) {category:<2} [{dist_int:>3}nm {flight_level:>5}] {ident:<7} {reg} {country} {owner} {mfr} {icao} site:{site}"
                 )
                 play_sound("/Users/yantisj/dev/ads-db/sounds/ding-high.mp3")
                 play_sound("/Users/yantisj/dev/ads-db/sounds/ding-high.mp3")
@@ -375,7 +426,7 @@ def update_plane(
 
 
 def update_plane_day(
-    icao, ident, squawk, ptype, distance, altitude, flight_level, heading, speed, reg, category
+    icao, ident, squawk, ptype, distance, altitude, flight_level, heading, speed, reg, category, site, owner
 ):
     "Store planes per day. If callsign is True, store each ident per plane per day"
 
@@ -432,13 +483,14 @@ def update_plane_day(
     # print(f'ic:{icao}, ident:{ident}, sq:{squawk}, pt:{ptype}, dist:{distance}, alt:{altitude}, head:{heading}, spd:{speed}')
     if not rows:
         cur = conn.cursor()
+        dist_int = int(distance)
         if call_sign:
             logger.debug(
-                f"Todays Flight {ident:>7} ({ptype}) {category:<2}: {reg:<6} {flight_level:<5} {icao}"
+                f"Todays Flight {ident:>7} ({ptype}) {category:<2} [{dist_int:>3}nm {flight_level:>5}] {ident:<7} {reg:<6} {icao} site:{site}"
             )
         else:
             logger.debug(
-                f"Todays Plane  {ident:>7} ({ptype}) {category:<2}: {reg:<6} {flight_level:<5} {icao}"
+                f"Todays Plane  {ident:>7} ({ptype}) {category:<2} [{dist_int:>3}nm {flight_level:>5}] {ident:<7} {reg} {owner} {icao} site:{site}"
             )
 
         sql = """INSERT INTO plane_days(icao,day,ident,speed,altitude,lowest_altitude,distance,closest,heading,firstseen,lastseen)
@@ -594,6 +646,11 @@ def update_flight(
 
     try:
         cur = conn.cursor()
+
+        # Check plane types first because of holddown
+        cur.execute("SELECT * FROM plane_types WHERE ptype=?", (ptype,))
+        count = cur.fetchall()
+    
         cur.execute("SELECT count(1) FROM flights WHERE flight=?", (flight,))
         count = cur.fetchall()[0][0]
         if count:
@@ -623,13 +680,13 @@ def update_flight(
         dist_int = int(distance)
         if flight in alert_flights:
             logger.warning(
-                f"ALERT FLT    {flight:>8} ({ptype}) {category:<2}: {dist_int:>3}nm {flight_level:<5} {reg:<6} {icao} {owner}"
+                f"ALERT FLT    {flight:>8} ({ptype}) {category:<2} [{dist_int:>3}nm {flight_level:>5}] {reg:<6} {icao} {owner}"
             )
             play_sound("/Users/yantisj/dev/ads-db/sounds/ding.mp3")
             time.sleep(0.5)
             play_sound("/Users/yantisj/dev/ads-db/sounds/ding.mp3")
         else:
-            logger.info(f"New Flight    {flight:>7} ({ptype}) {category:<2}: {dist_int:>3}nm {flight_level:<5} {reg:<6} {icao} {owner}")
+            logger.info(f"New Flight    {flight:>7} ({ptype}) {category:<2} [{dist_int:>3}nm {flight_level:>5}] {flight:<7} {reg:<6} {icao} {owner}")
         sql = """INSERT INTO flights(flight,icao,ptype,distance,closest,altitude,lowest_altitude,speed,lowest_speed,squawk,heading,registration,firstseen,lastseen)
               VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?) """
         cur.execute(
@@ -1158,8 +1215,9 @@ def alert_landing(
             ):
                 if (icao, ident, today) not in alerted:
                     alerted[(icao, ident, today)] = 1
+                    flight_level = get_flight_level(altitude)
                     logger.warning(
-                        f"Landing Alert {ident:>7} ({ptype:<4}) {category:<2}: d:{distance} a:{flight_level:<5} h:{heading} s:{speed:<3} id:{icao} lat:{lat} lon:{lon}"
+                        f"Landing Alert {ident:>7} ({ptype:<4}) {category:<2}: d:{distance} a:{flight_level:>5}: h:{heading} s:{speed:<3} id:{icao} lat:{lat} lon:{lon}"
                     )
                     if sounds and check_quiet_time():
                         play_sound("/Users/yantisj/dev/ads-db/sounds/ding-low.mp3")
@@ -1469,7 +1527,7 @@ def update_missing_data():
                 new = False
                 if not ptypes:
                     new = True
-                    logger.warning(f"!!    New Plane Type   !!: t:{ptype} m:{model} {icao} ")
+                    logger.warning(f"!!    New Hull Type    !!: t:{ptype} m:{model} {icao} ")
                     sql = """INSERT INTO plane_types(ptype,last_icao,firstseen,lastseen,count,manufacturer,model)
                         VALUES(?,?,?,?,?,?,?) """
                     cur2.execute(sql, (ptype, icao, now, now, 1, mfr, model))
@@ -1752,6 +1810,8 @@ def run_daemon(refresh=10, sites=["127.0.0.1"]):
                                 speed,
                                 reg,
                                 category,
+                                site,
+                                owner,
                             )
                         update_plane(
                             icao,
@@ -1777,7 +1837,7 @@ def run_daemon(refresh=10, sites=["127.0.0.1"]):
                             model_str = model[:11]
                             if new:
                                 logger.warning(
-                                    f"!! NEW PLANE TYPE !!  ({ptype:<4}) {category:<2}: {mfr} {model_str:<8} r:{reg} fl:{flight} c:{country} o:{owner} d:{distance} {icao}"
+                                    f"!! NEW HULL TYPE !!   ({ptype:<4}) {category:<2}: {mfr} {model_str:<8} r:{reg} fl:{flight} c:{country} o:{owner} d:{distance} {icao}"
                                 )
                                 if sounds and check_quiet_time():
                                     play_sound(
@@ -1919,16 +1979,21 @@ else:
 # Load config from file
 config = read_config("ads-db.conf")
 
+database_file = "./sqb/ads-db-planes.sqb"
 if args.db:
-    conn = sqlite3.connect(
-        "./sqb/" + args.db,
-        detect_types=sqlite3.PARSE_DECLTYPES | sqlite3.PARSE_COLNAMES,
-    )
-else:
-    conn = sqlite3.connect(
-        "./sqb/ads-db-planes.sqb",
-        detect_types=sqlite3.PARSE_DECLTYPES | sqlite3.PARSE_COLNAMES,
-    )
+    database_file = "./sqb/" + args.db
+
+# Connect to database
+conn = connect_ads_db(database_file)
+#     conn = sqlite3.connect(
+#         "./sqb/" + args.db,
+#         detect_types=sqlite3.PARSE_DECLTYPES | sqlite3.PARSE_COLNAMES,
+#     )
+# else:
+#     conn = sqlite3.connect(
+#         "./sqb/ads-db-planes.sqb",
+#         detect_types=sqlite3.PARSE_DECLTYPES | sqlite3.PARSE_COLNAMES,
+#     )
 if args.S:
     if not sounds:
         logger.info("Enabling Sounds")
