@@ -4,17 +4,21 @@ lat = 32.7800
 lon = -79.9400
 
 
-## Database files (need updating)
+## Database files (need updating occasionally)
 [db]
+# Best https://radarspotting.com/ (registration required)
+# Alt https://data.flightairmap.com/ (no registration)
 base_station = sqb/BaseStation.sqb
+
 # Optional Flight Data: https://www.virtualradarserver.co.uk/FlightRoutes.aspx
-standing_data = sqb/StandingData.sqb
+# standing_data = sqb/StandingData.sqb
 
 
 ## Flight tracking is restricted to known commercial flights by default
 [flights]
+
 # Add call signs not in the default system (example)
-extra_call_signs = LJX,JTZ
+#extra_call_signs = LJX,JTZ
 
 ## Uncomment to control tracked call signs -> flights locally vs DB
 # all_call_signs = DAL,SWA,RPA,UAL,AAL,JBU,FFT,MXY,NKS,JIA,FDX,UPS,ACA
@@ -28,6 +32,7 @@ all_flights = false
 sounds = false
 new_planes = B789,B78X
 landing = false
+# landing_size = 4
 boeing = false
 
 ## Alert on plane types in the area that meet these criteria

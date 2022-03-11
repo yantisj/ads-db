@@ -63,6 +63,8 @@ STATIC_CALL_SIGNS = [
     "WJA",
     "ASH",
     "VXP",
+    "FLE",
+
 ]
 
 # Create tables if they don't exist
@@ -321,13 +323,13 @@ def update_plane(
         dist_int = int(distance)
         if ptype in alert_types:
             logger.warning(
-                f"NEW PLANE {model_str:>11} ({ptype:>4}) {category:<2} [{dist_int:>3}nm {flight_level:<5}] {ident:<7} {reg} {country} {owner} {mfr} {icao} site:{site}"
+                f"NEW PLANE {model_str:>11} ({ptype:>4}) {category:<2} [{dist_int:>3}nm {flight_level:<5}] {ident:>7} {reg} {country} {owner} {mfr} {icao} site:{site}"
             )
             play_sound("/Users/yantisj/dev/ads-db/sounds/ding-high.mp3")
             play_sound("/Users/yantisj/dev/ads-db/sounds/ding-high.mp3")
         else:
             logger.info(
-                f"New Plane {model_str:>11} ({ptype:>4}) {category:<2} [{dist_int:>3}nm {flight_level:<5}] {ident:<7} {reg} {country} {owner} {mfr} {icao} site:{site}"
+                f"New Plane {model_str:>11} ({ptype:>4}) {category:<2} [{dist_int:>3}nm {flight_level:<5}] {ident:>7} {reg} {country} {owner} {mfr} {icao} site:{site}"
             )
         sql = """INSERT INTO planes(icao,ident,ptype,speed,altitude,lowest_altitude,distance,closest,heading,firstseen,lastseen,registration,country,owner,military,day_count,category)
               VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) """
@@ -1198,13 +1200,18 @@ def alert_landing(
     lon,
     baro_rate,
     category,
+    reg
 ):
     global sounds
     today = date.today()
 
 
     # Only alert on A3+ flights or flights that don't report
-    size = 3
+    alert_size = 3
+    if 'landing_size' in config['alerts']:
+        alert_size = int(config['alerts']['landing_size'])
+    size = alert_size
+
     if category and re.search('^A\d', category):
         size = int(category[1])
     if "local_planes" in config["alerts"]:
@@ -1213,30 +1220,39 @@ def alert_landing(
             size = 3
 
     # print(f'ic:{icao}, ident:{ident}, sq:{squawk}, pt:{ptype}, dist:{distance}, alt:{altitude}, head:{heading}, spd:{speed}')
-    if size >= 3 and icao and distance and heading and speed and altitude:
+    if icao and distance and heading and speed and altitude:
         try:
             # and heading < 365 and heading > 240
             if (
                 distance < 4.0
-                and lat < 32.78
+                and lat < 32.80
                 and lon < -79.90
                 and baro_rate < 1000
                 and altitude > 1000
                 and altitude < 4500
                 and speed < 300
-                and speed > 150
+                and speed > 145
                 and (heading > 310 or heading < 30)
             ):
                 if (icao, ident, today) not in alerted:
                     alerted[(icao, ident, today)] = 1
                     flight_level = get_flight_level(altitude)
-                    logger.warning(
-                        f"Landing Alert {ident:>7} ({ptype:<4}) {category:<2}: d:{distance} a:{flight_level:>5}: h:{heading} s:{speed:<3} id:{icao} lat:{lat} lon:{lon}"
-                    )
-                    if sounds and check_quiet_time():
-                        play_sound("/Users/yantisj/dev/ads-db/sounds/ding-low.mp3")
-                        if size == 5:
-                            play_sound("/Users/yantisj/dev/ads-db/sounds/ding-low-fast.mp3")
+                    dist_int = int(distance)
+                    (from_airport, to_airport) = get_flight_data(ident)
+
+                    # Only alert on larger sizes or tracked types, otherwise log landing
+                    if size >= alert_size:
+                        logger.warning(
+                            f"Landing Alert {ident:>7} ({ptype:<4}) {category:<2} [{dist_int:>3}nm {flight_level:<5}] {ident:>7} {from_airport:>4}<>{to_airport:<4} {reg:<6} {icao} lat:{lat} lon:{lon}"
+                        )
+                        if sounds and check_quiet_time():
+                            play_sound("/Users/yantisj/dev/ads-db/sounds/ding-low.mp3")
+                            if size == 5:
+                                play_sound("/Users/yantisj/dev/ads-db/sounds/ding-low-fast.mp3")
+                    else:
+                        logger.info(
+                            f"Plane Landing {ident:>7} ({ptype:<4}) {category:<2} [{dist_int:>3}nm {flight_level:<5}] {ident:>7} {from_airport:>4}<>{to_airport:<4} {reg:<6} {icao} lat:{lat} lon:{lon}"
+                        )
 
         except TypeError as e:
             logger.critical(
@@ -1901,6 +1917,7 @@ def run_daemon(refresh=10, sites=["127.0.0.1"]):
                                 lon,
                                 baro_rate,
                                 category,
+                                reg,
                             )
                         if config["alerts"]["boeing"] in ["true", "True", "1"]:
                             alert_b787(

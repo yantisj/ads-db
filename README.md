@@ -1,7 +1,7 @@
 # ADS-DB Install and User Guide
 
 ## Benefits of ADS-DB
-Keep track of every plane/flight you're receiever has ever seen, so you can check for past activity in your area. Get alerted to when a specific plane is overhead or even landing at a nearby airport with approach detection. Keeps a record of each plane's registration data, IDENT, and detailed plane information for each manufacturer for every plane your receiver detects for additional analysis and reporting.
+Discover interesting air traffic by keeping a database of all air traffic and flights ever seen by your receiver. Ability to check for past activity in your area, and keep detailed logs of all air traffic. Get alerted to when a specific plane or flight is overhead, or landing at a nearby airport with approach detection. Keeps a record of each plane's registration data, IDENT, and detailed plane information for each manufacturer for every plane your receiver detects for additional analysis and reporting.
 
 ADS-DB connects to one or more Piaware/dump1090-fa ADSB nodes and saves all planes and flights to a SQLite database for later analysis. ADS-DB records the first and last time a plane is seen, each day, along with the last known altitude, heading and other information. This program will also record and flag all military planes seen.
 
@@ -49,19 +49,34 @@ optional arguments:
 
 # Useful Examples
 
+### Configurable Log Level Output
+```
+2022-03-11 11:01:08,607 DEBUG    Todays Flight  JBU267 (BCS3) A3 [ 39nm 10725]  JBU267 KSMF<>KLGB N3008J A322CB site:172.20.30.30
+2022-03-11 11:02:58,098 INFO     New Plane        G550 (G550) A3 [103nm FL450] N973AC  N973AC USA Alcamo Aviation LLC Gulfstream Aerospace AD8ECD site:127.0.0.1
+2022-03-11 11:05:49,558 INFO     New Flight     ACA926 (A333) A5 [ 73nm FL400]  ACA926 CYUL<>KFLL C-GHLM C0584F Air Canada
+
+
+2022-03-11 12:10:25,830 WARNING  !! NEW HULL TYPE !!   (E170) A3: Embraer EMB-170 SE r:N642RW fl:RPA3682 c:USA o:United Express d:36.6 A86E35
+2022-03-11 12:12:02,686 INFO     New Flight    RPA3448 (E170) A3 [ 71nm 16800] RPA3448 KMSY<>KCHS N865RW ABE2F6 United Express
+2022-03-11 12:12:02,687 DEBUG    Todays Flight RPA3448 (E170) A3 [ 71nm 16800] RPA3448 KMSY<>KCHS N865RW ABE2F6 site:172.20.30.30
+2022-03-11 12:12:02,687 INFO     New Plane  EMB-170 SE (E170) A3 [ 71nm 16800] RPA3448 N865RW USA United Express Embraer ABE2F6 site:172.20.30.30
+2022-03-11 12:22:48,830 INFO     Local Alert!  RPA3448 (E170) A3 [ 22nm 4850 ] RPA3448 N865RW USA United Express Embraer ABE2F6 site:172.20.30.30
+2022-03-11 12:30:03,659 WARNING  Landing Alert RPA3580 (E75L) A3 [  1nm 1850 ] RPA3580 KEWR<>KCHS N729YX A9C737 lat:32.757019 lon:-79.930261
+```
+
+
 ### Flight lookup
 ```
-ads -lf SWA1231
+ads -lf RPA3644
 
-FLIGHT#   PTYPE  REGISTR    ICAO    CT  DST MIN  ALT     LOW     FIRST                 LAST
--------   ----   --------   ------  --- --- ---  -----   -----   --------------------  -------------------
-SWA1231   B38M   N8747Q     AC088E  0   48  48   38000   38000   2022-03-09 20:37:36   2022-03-09 20:40:00
+FLIGHT#   FROM  TO   PTYPE  REGISTR    ICAO    CT  DST MIN  ALT     LOW     FIRST                 LAST
+-------   ---- ----  ----   --------   ------  --- --- ---  -----   -----   --------------------  -------------------
+RPA3644   KCHS KEWR  E75L   N725YX     A9B85B  0   43  10   13975   625     2022-03-10 11:04:02   2022-03-11 11:11:26
 
 IACO   TYPE  REG      FLIGHT       DST MIN  ALT     LOW     FIRST                 LAST
 ----   ----  -------  -------      --- ---  -----   -----   -------------------   -------------------
-AC088E B38M  N8747Q   SWA1231      48  48   38000   38000   2022-03-09 20:37:36   2022-03-09 20:40:00
-ABAAA8 B738  N8507C   SWA1231      118 108  40000   40000   2022-03-08 21:02:35   2022-03-08 21:10:30
-AAA668 B737  N7857B   SWA1231      108 104  38000   38000   2022-03-07 12:51:51   2022-03-07 20:47:06
+A9B85B E75L  N725YX   RPA3644      43  10   13975   625     2022-03-11 11:05:04   2022-03-11 11:11:26
+A9EEB6 E75L  N739YX   RPA3644      64  13   18825   1450    2022-03-10 11:04:02   2022-03-10 11:12:39
 ```
 
 ### Specific plane lookup by IACO (or registration/ident)
