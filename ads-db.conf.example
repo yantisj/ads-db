@@ -7,6 +7,8 @@ lon = -79.9400
 ## Database files (need updating)
 [db]
 base_station = sqb/BaseStation.sqb
+# Optional Flight Data: https://www.virtualradarserver.co.uk/FlightRoutes.aspx
+standing_data = sqb/StandingData.sqb
 
 
 ## Flight tracking is restricted to known commercial flights by default

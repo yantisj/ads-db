@@ -33,6 +33,7 @@ ptype_alerted = dict()
 pdict = dict()
 cdict = defaultdict(int)
 lookup = None
+flight_conn = None
 sounds = False
 
 # Holddown empty data for a few cycles
@@ -117,6 +118,8 @@ sql_create_flights_table = """ CREATE TABLE IF NOT EXISTS flights (
                                     heading float,
                                     registration text,
                                     day_count integer,
+                                    from_airport text,
+                                    to_airport text,
                                     firstseen timestamp,
                                     lastseen timestamp
                                 ); """
@@ -318,13 +321,13 @@ def update_plane(
         dist_int = int(distance)
         if ptype in alert_types:
             logger.warning(
-                f"NEW PLANE {model_str:>11} ({ptype:>4}) {category:<2} [{dist_int:>3}nm {flight_level:>5}] {ident:<7} {reg} {country} {owner} {mfr} {icao} site:{site}"
+                f"NEW PLANE {model_str:>11} ({ptype:>4}) {category:<2} [{dist_int:>3}nm {flight_level:<5}] {ident:<7} {reg} {country} {owner} {mfr} {icao} site:{site}"
             )
             play_sound("/Users/yantisj/dev/ads-db/sounds/ding-high.mp3")
             play_sound("/Users/yantisj/dev/ads-db/sounds/ding-high.mp3")
         else:
             logger.info(
-                f"New Plane {model_str:>11} ({ptype:>4}) {category:<2} [{dist_int:>3}nm {flight_level:>5}] {ident:<7} {reg} {country} {owner} {mfr} {icao} site:{site}"
+                f"New Plane {model_str:>11} ({ptype:>4}) {category:<2} [{dist_int:>3}nm {flight_level:<5}] {ident:<7} {reg} {country} {owner} {mfr} {icao} site:{site}"
             )
         sql = """INSERT INTO planes(icao,ident,ptype,speed,altitude,lowest_altitude,distance,closest,heading,firstseen,lastseen,registration,country,owner,military,day_count,category)
               VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) """
@@ -413,7 +416,7 @@ def update_plane(
                 alerted[(icao, today)] = 1
                 dist_int = int(distance)
                 logger.info(
-                    f"Local Alert! {ident:>8} ({ptype:<4}) {category:<2} [{dist_int:>3}nm {flight_level:>5}] {ident:<7} {reg} {country} {owner} {mfr} {icao} site:{site}"
+                    f"Local Alert! {ident:>8} ({ptype:<4}) {category:<2} [{dist_int:>3}nm {flight_level:<5}] {ident:<7} {reg} {country} {owner} {mfr} {icao} site:{site}"
                 )
                 play_sound("/Users/yantisj/dev/ads-db/sounds/ding-high.mp3")
                 play_sound("/Users/yantisj/dev/ads-db/sounds/ding-high.mp3")
@@ -438,6 +441,8 @@ def update_plane_day(
         return
 
     signs = get_call_signs()
+
+    (from_airport, to_airport) = get_flight_data(ident)
 
     # Track all flights instead of just plane days
     if (
@@ -486,11 +491,11 @@ def update_plane_day(
         dist_int = int(distance)
         if call_sign:
             logger.debug(
-                f"Todays Flight {ident:>7} ({ptype}) {category:<2} [{dist_int:>3}nm {flight_level:>5}] {ident:<7} {reg:<6} {icao} site:{site}"
+                f"Todays Flight {ident:>7} ({ptype}) {category:<2} [{dist_int:>3}nm {flight_level:<5}] {ident:>7} {from_airport:>4}<>{to_airport:<4} {reg:<6} {icao} site:{site}"
             )
         else:
             logger.debug(
-                f"Todays Plane  {ident:>7} ({ptype}) {category:<2} [{dist_int:>3}nm {flight_level:>5}] {ident:<7} {reg} {owner} {icao} site:{site}"
+                f"Todays Plane  {ident:>7} ({ptype}) {category:<2} [{dist_int:>3}nm {flight_level:<5}] {ident:>7} {reg} {owner} {icao} site:{site}"
             )
 
         sql = """INSERT INTO plane_days(icao,day,ident,speed,altitude,lowest_altitude,distance,closest,heading,firstseen,lastseen)
@@ -622,6 +627,9 @@ def update_flight(
 
     signs = get_call_signs()
 
+
+    (from_airport, to_airport) = get_flight_data(flight)
+
     # Track all flights instead of just plane days
     if (
         "flights" in config
@@ -680,15 +688,15 @@ def update_flight(
         dist_int = int(distance)
         if flight in alert_flights:
             logger.warning(
-                f"ALERT FLT    {flight:>8} ({ptype}) {category:<2} [{dist_int:>3}nm {flight_level:>5}] {reg:<6} {icao} {owner}"
+                f"ALERT FLT    {flight:>8} ({ptype}) {category:<2} [{dist_int:>3}nm {flight_level:<5}] {reg:<6} {icao} {owner}"
             )
             play_sound("/Users/yantisj/dev/ads-db/sounds/ding.mp3")
             time.sleep(0.5)
             play_sound("/Users/yantisj/dev/ads-db/sounds/ding.mp3")
         else:
-            logger.info(f"New Flight    {flight:>7} ({ptype}) {category:<2} [{dist_int:>3}nm {flight_level:>5}] {flight:<7} {reg:<6} {icao} {owner}")
-        sql = """INSERT INTO flights(flight,icao,ptype,distance,closest,altitude,lowest_altitude,speed,lowest_speed,squawk,heading,registration,firstseen,lastseen)
-              VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?) """
+            logger.info(f"New Flight    {flight:>7} ({ptype}) {category:<2} [{dist_int:>3}nm {flight_level:<5}] {flight:>7} {from_airport:>4}<>{to_airport:<4} {reg:<6} {icao} {owner}")
+        sql = """INSERT INTO flights(flight,icao,ptype,distance,closest,altitude,lowest_altitude,speed,lowest_speed,squawk,heading,registration,from_airport,to_airport,firstseen,lastseen)
+              VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) """
         cur.execute(
             sql,
             (
@@ -704,6 +712,8 @@ def update_flight(
                 squawk,
                 heading,
                 reg,
+                from_airport,
+                to_airport,
                 now,
                 now,
             ),
@@ -740,7 +750,7 @@ def update_flight(
                     low_dist = distance
                     low_alt = altitude
 
-                sql = """UPDATE flights SET icao=?, ptype=?, distance=?, closest=?, altitude=?, lowest_altitude=?, speed=?, lowest_speed=?, squawk=?, heading=?, registration=?, lastseen=?
+                sql = """UPDATE flights SET icao=?, ptype=?, distance=?, closest=?, altitude=?, lowest_altitude=?, speed=?, lowest_speed=?, squawk=?, heading=?, registration=?, from_airport=?, to_airport=?, lastseen=?
                     WHERE flight = ? """
                 cur.execute(
                     sql,
@@ -756,6 +766,8 @@ def update_flight(
                         nsquawk,
                         heading,
                         reg,
+                        from_airport,
+                        to_airport,
                         now,
                         flight,
                     ),
@@ -989,10 +1001,10 @@ def print_plane_days(rows, hours=0):
 def print_flights(rows, hours=0, low_alt=0):
 
     print(
-        "\nFLIGHT#   PTYPE  REGISTR    ICAO    CT  DST MIN  ALT     LOW     FIRST                 LAST"
+        "\nFLIGHT#   FROM  TO   PTYPE  REGISTR    ICAO    CT  DST MIN  ALT     LOW     FIRST                 LAST"
     )
     print(
-        "-------   ----   --------   ------  --- --- ---  -----   -----   --------------------  -------------------"
+        "-------   ---- ----  ----   --------   ------  --- --- ---  -----   -----   --------------------  -------------------"
     )
 
     hours_ago = None
@@ -1013,8 +1025,10 @@ def print_flights(rows, hours=0, low_alt=0):
         lowest_altitude = int(r["lowest_altitude"])
         first = str(r["firstseen"]).split(".")[0]
         last = str(r["lastseen"]).split(".")[0]
+        from_airport = str(r['from_airport'])
+        to_airport = str(r['to_airport'])
         print(
-            f"{r['flight']:<9} {r['ptype']:<5}  {r['registration']:<8}   {r['icao']:<6}  {day_count:<3} {distance:<3} {closest:<4} {altitude:<7} {lowest_altitude:<7} {first:<10}   {last:<10}"
+            f"{r['flight']:<9} {from_airport:<4} {to_airport:<4}  {r['ptype']:<5}  {r['registration']:<8}   {r['icao']:<6}  {day_count:<3} {distance:<3} {closest:<4} {altitude:<7} {lowest_altitude:<7} {first:<10}   {last:<10}"
         )
 
     return count
@@ -1133,7 +1147,7 @@ def lookup_model_mfr(icao):
     # cur.execute("SELECT * FROM Aircraft LEFT JOIN Model ON Aircraft.ModelID = Model.ModelID LEFT JOIN Operator ON Aircraft.OperatorID = Operator.OperatorID WHERE Aircraft.Icao = ?", (icao,))
     # cur.execute("select Icao,Engines,Model,Manufacturer from AircraftTypeView WHERE Icao = ? LIMIT 1;", (ptype,))
     cur.execute(
-        "SELECT ModeS,OperatorFlagCode,CurrentRegDate,ModeSCountry,Country,AircraftClass,Engines,YearBuilt,Manufacturer,Type,RegisteredOwners,Registration,ICAOTypeCode FROM Aircraft WHERE ModeS = ?",
+        "SELECT ModeS,OperatorFlagCode,CurrentRegDate,ModeSCountry,Country,AircraftClass,Engines,PopularName,Manufacturer,Type,RegisteredOwners,Registration,ICAOTypeCode FROM Aircraft WHERE ModeS = ?",
         (icao,),
     )
     rows = cur.fetchall()
@@ -1468,6 +1482,25 @@ def get_call_signs():
     return signs
 
 
+def get_flight_data(flight):
+
+    if not flight_conn:
+        return ("", "")
+
+    from_airport = ""
+    to_airport = ""
+
+    cur = flight_conn.cursor()
+    rows = dict_gen(cur.execute("SELECT * FROM RouteView WHERE Callsign = ?", (flight, )))
+    for row in rows:
+        if row:
+            from_airport = str(row['fromairporticao'])
+            to_airport = str(row['toairporticao'])
+            break
+
+    return (from_airport, to_airport)
+
+
 def update_missing_data():
     "Refresh all data from databases on missing info"
 
@@ -1503,6 +1536,7 @@ def update_missing_data():
             country = dets[3]
             owner = dets[4]
             military = dets[5]
+            year = dets[7]
             model = model[:50]
             if model:
                 models[ptype] = model
@@ -1789,7 +1823,7 @@ def run_daemon(refresh=10, sites=["127.0.0.1"]):
                                 ptype,
                                 distance,
                                 altitude,
-                                 flight_level,
+                                flight_level,
                                 speed,
                                 squawk,
                                 heading,
@@ -1848,9 +1882,11 @@ def run_daemon(refresh=10, sites=["127.0.0.1"]):
                                         "/Users/yantisj/dev/ads-db/sounds/ding-high.mp3"
                                     )
                         else:
-                            logger.debug(
-                                f"No Plane Type: {icao} {reg} {ptype} {flight} {squawk} {lat} {lon} {altitude} {heading} {distance} {speed}"
-                            )
+                            if (icao, 'notype') not in alerted:
+                                alerted[(icao, 'notype')] = 1
+                                logger.debug(
+                                    f"No Plane Type: {icao} {reg} {ptype} {flight} {squawk} {lat} {lon} {altitude} {heading} {distance} {speed}"
+                                )
                         if config["alerts"]["landing"] in ["true", "True", "1"]:
                             alert_landing(
                                 icao,
@@ -1985,15 +2021,11 @@ if args.db:
 
 # Connect to database
 conn = connect_ads_db(database_file)
-#     conn = sqlite3.connect(
-#         "./sqb/" + args.db,
-#         detect_types=sqlite3.PARSE_DECLTYPES | sqlite3.PARSE_COLNAMES,
-#     )
-# else:
-#     conn = sqlite3.connect(
-#         "./sqb/ads-db-planes.sqb",
-#         detect_types=sqlite3.PARSE_DECLTYPES | sqlite3.PARSE_COLNAMES,
-#     )
+if 'standing_data' in config['db']:
+    flight_conn = sqlite3.connect(
+        config['db']['standing_data'],
+        detect_types=sqlite3.PARSE_DECLTYPES | sqlite3.PARSE_COLNAMES,
+    )
 if args.S:
     if not sounds:
         logger.info("Enabling Sounds")

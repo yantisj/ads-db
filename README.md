@@ -150,6 +150,10 @@ lon = -79.9400
 - https://radarspotting.com/forum/index.php?action=tportal;sa=download;dl=item521
 
 
+### Optionally install StandingData.sqb for flight data
+
+Unzip StandingData.sqb to sqb directory and update ads-db.conf to use it.
+
 ```
 wget https://data.flightairmap.com/data/basestation/BaseStation.sqb.gz
 gunzip BaseStation.sqb.gz

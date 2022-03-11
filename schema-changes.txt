@@ -1,0 +1,2 @@
+ALTER TABLE flights add column from_airport text;
+ALTER TABLE flights add column to_airport text;
