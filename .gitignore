@@ -1,6 +1,8 @@
 venv/
 planes.db
 planes.db*
+test.db
+test.db*
 ads-db-planes.sqb
 ads-db-planes.sqb*
 *.log

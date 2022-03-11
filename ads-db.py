@@ -56,7 +56,9 @@ STATIC_CALL_SIGNS = [
     "AAY",
     "EDV",
     "AJT",
-
+    "WJA",
+    "ASH",
+    "VXP",
 ]
 
 # Create tables if they don't exist
@@ -197,6 +199,7 @@ def update_plane(
     model,
     distance,
     altitude,
+    flight_level,
     heading,
     speed,
     reg,
@@ -205,6 +208,7 @@ def update_plane(
     military,
     category,
     site,
+    mfr,
 ):
 
     now = datetime.now()
@@ -226,7 +230,7 @@ def update_plane(
     if "local_distance" in config["alerts"]:
         local_distance = int(config["alerts"]["local_distance"])
     else:
-        local_distance = 30
+        local_distance = 40
 
     try:
         cur = conn.cursor()
@@ -259,17 +263,17 @@ def update_plane(
 
     # print(f'ic:{icao}, ident:{ident}, sq:{squawk}, pt:{ptype}, dist:{distance}, alt:{altitude}, head:{heading}, spd:{speed}')
     if not rows:
-
+        model_str = model[:11]
+        dist_int = int(distance)
         if ptype in alert_types:
             logger.warning(
-                f"New Plane (alerting): {icao} t:{ptype} m:{model} id:{ident} alt:{altitude} site:{site}"
+                f"NEW PLANE {model_str:>11} ({ptype:>4}) {category:<2}: {dist_int:>3}nm {flight_level:<5} {ident:<6} {reg} {country} {owner} {mfr} {icao} site:{site}"
             )
-            play_sound("/Users/yantisj/dev/ads-db/sounds/ding.mp3")
-            time.sleep(0.5)
-            play_sound("/Users/yantisj/dev/ads-db/sounds/ding.mp3")
+            play_sound("/Users/yantisj/dev/ads-db/sounds/ding-high.mp3")
+            play_sound("/Users/yantisj/dev/ads-db/sounds/ding-high.mp3")
         else:
             logger.info(
-                f"New Plane: {icao} t:{ptype} id:{ident} alt:{altitude} site:{site}"
+                f"New Plane {model_str:>11} ({ptype:>4}) {category:<2}: {dist_int:>3}nm {flight_level:<5} {ident:<6} {reg} {country} {owner} {mfr} {icao} site:{site}"
             )
         sql = """INSERT INTO planes(icao,ident,ptype,speed,altitude,lowest_altitude,distance,closest,heading,firstseen,lastseen,registration,country,owner,military,day_count,category)
               VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) """
@@ -318,6 +322,12 @@ def update_plane(
             nsquawk = row[9]
             if squawk:
                 nsquawk = squawk
+            # Reset low/distance stats once per day
+            if row[12].date() < today:
+                # print('Lastseen date reset plane', row)
+                # print(distance, altitude)
+                low_dist = distance
+                low_alt = altitude
             sql = """UPDATE planes SET ident = ?, ptype = ?, squawk = ?, speed = ?, altitude = ?, lowest_altitude = ?, distance = ?, closest = ?, heading = ?, lastseen = ?, registration = ?, country = ?, owner = ?, military = ?, day_count = ?, category = ?
                 WHERE icao = ? """
             cur.execute(
@@ -345,14 +355,17 @@ def update_plane(
             if (
                 ptype in local_types
                 and (icao, today) not in alerted
+                and ident
                 and altitude < local_altitude
                 and distance < local_distance
             ):
                 alerted[(icao, today)] = 1
+                dist_int = int(distance)
                 logger.info(
-                    f"Local Alert: {icao} t:{ptype} d:{distance} alt:{altitude} id:{ident} site:{site}"
+                    f"Local Alert! {ident:>8} ({ptype:<4}) {category:<2}: {dist_int:>3}nm {flight_level:<5} {ident:<6} {reg} {country} {owner} {mfr} {icao} site:{site}"
                 )
-                play_sound("/Users/yantisj/dev/ads-db/sounds/ding.mp3")
+                play_sound("/Users/yantisj/dev/ads-db/sounds/ding-high.mp3")
+                play_sound("/Users/yantisj/dev/ads-db/sounds/ding-high.mp3")
 
         except TypeError as e:
             logger.critical(
@@ -362,7 +375,7 @@ def update_plane(
 
 
 def update_plane_day(
-    icao, ident, squawk, ptype, distance, altitude, heading, speed, reg, category
+    icao, ident, squawk, ptype, distance, altitude, flight_level, heading, speed, reg, category
 ):
     "Store planes per day. If callsign is True, store each ident per plane per day"
 
@@ -421,11 +434,11 @@ def update_plane_day(
         cur = conn.cursor()
         if call_sign:
             logger.debug(
-                f"Todays Flight {ident} ({ptype}): {now_date} {icao} alt:{altitude}"
+                f"Todays Flight {ident:>7} ({ptype}) {category:<2}: {reg:<6} {flight_level:<5} {icao}"
             )
         else:
             logger.debug(
-                f"Todays Plane  {ident} ({ptype}): {now_date} {icao} alt:{altitude}"
+                f"Todays Plane  {ident:>7} ({ptype}) {category:<2}: {reg:<6} {flight_level:<5} {icao}"
             )
 
         sql = """INSERT INTO plane_days(icao,day,ident,speed,altitude,lowest_altitude,distance,closest,heading,firstseen,lastseen)
@@ -540,10 +553,12 @@ def update_flight(
     ptype,
     distance,
     altitude,
+    flight_level,
     speed,
     squawk,
     heading,
     reg,
+    owner,
     category,
 ):
 
@@ -571,7 +586,7 @@ def update_flight(
     if not call_sign:
         if (flight, 'tracking') not in alerted:
             alerted[(flight, 'tracking')] = 1
-            logger.debug(f"Tracking not enabled for this flight: {flight}")
+            # logger.debug(f"Flight Tracking not enabled for this flight: {flight}")
         return
 
     now = datetime.now()
@@ -605,15 +620,16 @@ def update_flight(
 
     # print(f'ic:{icao}, ident:{ident}, sq:{squawk}, pt:{ptype}, dist:{distance}, alt:{altitude}, head:{heading}, spd:{speed}')
     if not rows:
+        dist_int = int(distance)
         if flight in alert_flights:
             logger.warning(
-                f"New Flight {flight:<7} ({ptype})!!: {reg:<6} alt:{altitude:<5} {icao}"
+                f"ALERT FLT    {flight:>8} ({ptype}) {category:<2}: {dist_int:>3}nm {flight_level:<5} {reg:<6} {icao} {owner}"
             )
             play_sound("/Users/yantisj/dev/ads-db/sounds/ding.mp3")
             time.sleep(0.5)
             play_sound("/Users/yantisj/dev/ads-db/sounds/ding.mp3")
         else:
-            logger.info(f"New Flight {flight:<7} ({ptype}): {reg:<6} alt:{altitude:<5} {icao}")
+            logger.info(f"New Flight    {flight:>7} ({ptype}) {category:<2}: {dist_int:>3}nm {flight_level:<5} {reg:<6} {icao} {owner}")
         sql = """INSERT INTO flights(flight,icao,ptype,distance,closest,altitude,lowest_altitude,speed,lowest_speed,squawk,heading,registration,firstseen,lastseen)
               VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?) """
         cur.execute(
@@ -662,6 +678,11 @@ def update_flight(
                 if squawk:
                     nsquawk = squawk
 
+                if row["lastseen"].date() < today:
+                    # print('Lastseen date reset', row)
+                    low_dist = distance
+                    low_alt = altitude
+
                 sql = """UPDATE flights SET icao=?, ptype=?, distance=?, closest=?, altitude=?, lowest_altitude=?, speed=?, lowest_speed=?, squawk=?, heading=?, registration=?, lastseen=?
                     WHERE flight = ? """
                 cur.execute(
@@ -703,7 +724,7 @@ def update_ptype(ptype, icao, mfr, model):
     new = False
     if not rows:
         new = True
-        logger.info(f"!! New Type of Plane !!: {icao} t:{ptype}")
+        # logger.debug(f"!!!  New Type of Plane   !!!: {icao} t:{ptype}")
         sql = """INSERT INTO plane_types(ptype,last_icao,firstseen,lastseen,count,manufacturer,model)
               VALUES(?,?,?,?,?,?,?) """
         cur.execute(sql, (ptype, icao, now, now, 1, mfr, model))
@@ -738,6 +759,13 @@ def get_day_count(icao):
     cur.execute("SELECT count(*) FROM plane_days WHERE icao = ?", (icao,))
     (count,) = cur.fetchone()
     return count
+
+def get_flight_level(altitude):
+
+    if altitude >= 18000:
+        fl = round(altitude / 100)
+        return f'FL{fl}'
+    return altitude
 
 
 def lookup_ptype(
@@ -951,8 +979,9 @@ def lookup_ptypes(ptype, hours=0, mfr=None):
     total = 0
     planes = 0
     print(
-        "MFR          TYPE  CNT  LAST_IDENT      FIRST SEEN            LAST SEEN             MODEL"
+        "\nMFR          TYPE  CNT  L_ICAO  MODEL            FIRST SEEN            LAST SEEN"
     )
+    print("--------     ----  ---  ------  ------------     --------------------  -------------------")
     hours_ago = None
     if hours:
         hours_ago = datetime.now() - timedelta(hours=hours)
@@ -974,7 +1003,7 @@ def lookup_ptypes(ptype, hours=0, mfr=None):
         if model:
             model = model[:50]
         print(
-            f"{mfr:<12} {row[0]:<5} {cnt:<4} {row[1]:<6}          {first:<10}   {last:<10}   {model}"
+            f"{mfr:<12} {row[0]:<5} {cnt:<4} {row[1]:<6}  {model:<16} {first:<10}   {last:<10}"
         )
 
     if total > 1:
@@ -1006,7 +1035,7 @@ def lookup_icao(icao):
     rows = cur.fetchall()
     total = print_planes(rows)
     if total == 1:
-        cur.execute("SELECT * FROM plane_days WHERE icao = ?", (icao,))
+        cur.execute("SELECT * FROM plane_days WHERE icao = ? ORDER BY lastseen DESC", (icao,))
         rows = cur.fetchall()
         print_plane_days(rows)
 
@@ -1034,7 +1063,7 @@ def lookup_reg(reg):
     total = print_planes(rows)
     if total == 1:
         row = rows[0]
-        cur.execute("SELECT * FROM plane_days WHERE icao = ?", (row[0],))
+        cur.execute("SELECT * FROM plane_days WHERE icao = ? ORDER BY lastseen DESC", (row[0],))
         rows = cur.fetchall()
         print_plane_days(rows)
     else:
@@ -1102,8 +1131,18 @@ def alert_landing(
     global sounds
     today = date.today()
 
+
+    # Only alert on A3+ flights or flights that don't report
+    size = 3
+    if category and re.search('^A\d', category):
+        size = int(category[1])
+    if "local_planes" in config["alerts"]:
+        local_types = config["alerts"]["local_planes"].split(",")
+        if ptype in local_types and size < 3:
+            size = 3
+
     # print(f'ic:{icao}, ident:{ident}, sq:{squawk}, pt:{ptype}, dist:{distance}, alt:{altitude}, head:{heading}, spd:{speed}')
-    if icao and distance and heading and speed and altitude:
+    if size >= 3 and icao and distance and heading and speed and altitude:
         try:
             # and heading < 365 and heading > 240
             if (
@@ -1120,14 +1159,13 @@ def alert_landing(
                 if (icao, ident, today) not in alerted:
                     alerted[(icao, ident, today)] = 1
                     logger.warning(
-                        f"!! Landing Alert {ident:>7} ({ptype}) !!: {category} {icao} d:{distance} h:{heading} s:{speed} a:{altitude} lat:{lat} lon:{lon}"
+                        f"Landing Alert {ident:>7} ({ptype:<4}) {category:<2}: d:{distance} a:{flight_level:<5} h:{heading} s:{speed:<3} id:{icao} lat:{lat} lon:{lon}"
                     )
                     if sounds and check_quiet_time():
                         play_sound("/Users/yantisj/dev/ads-db/sounds/ding-low.mp3")
-                        # time.sleep(0.5)
-                        play_sound(
-                            "/Users/yantisj/dev/ads-db/sounds/airplane-fly-over.mp3"
-                        )
+                        if size == 5:
+                            play_sound("/Users/yantisj/dev/ads-db/sounds/ding-low-fast.mp3")
+
         except TypeError as e:
             logger.critical(
                 f"Error updating plane: {icao} t:{ptype} id:{ident} alt:{altitude}: {e}"
@@ -1151,7 +1189,7 @@ def alert_b787(icao, ident, squawk, ptype, distance, altitude, heading, speed):
                 if (icao, ident, today) not in ptype_alerted:
                     ptype_alerted[(icao, ident, today)] = 1
                     logger.warning(
-                        f"Boeing 787 Airborne!!!  ic:{icao}, ident:{ident}, sq:{squawk}, pt:{ptype}, dist:{distance}, alt:{altitude}, head:{heading}, spd:{speed}"
+                        f"!!!Boeing 787 Airborne!!!  ic:{icao}, ident:{ident}, sq:{squawk}, pt:{ptype}, dist:{distance}, alt:{altitude}, head:{heading}, spd:{speed}"
                     )
                     # print(f'ic:{icao}, ident:{ident}, sq:{squawk}, pt:{ptype}, dist:{distance}, alt:{altitude}, head:{heading}, spd:{speed}')
                     if sounds and check_quiet_time():
@@ -1202,7 +1240,7 @@ def alert_ident(ident, sites=["127.0.0.1"], min_distance=0):
                             logger.warning(f"Located Plane!!: {ident} from {site}")
                             lookup_icao(icao)
                             play_sound("/Users/yantisj/dev/ads-db/sounds/ding.mp3")
-                            time.sleep(5)
+                            time.sleep(3)
                             play_sound("/Users/yantisj/dev/ads-db/sounds/ding.mp3")
                             tracking.remove(ident)
 
@@ -1319,15 +1357,16 @@ def get_db_stats():
                 fflights_new[flight] = 1
                 flight_count_new += 1
 
-    print(f"\n ADS-DB Stats                             [{last_seen}]")
-    print("================================================================")
+    print(f"\n   ADS-DB Stats:                          [{last_seen}]")
+    print("=================================================================")
     print(
-        f" Flight Numbers: {flight_count:<6,}  30days: {flight_count_mon:<6,} 24hrs: {flight_count_day:<6,} New: {flight_count_new:<3}"
+        f" Flight Numbers: {flight_count:<6,}  30days: {flight_count_mon:<6,}  24hrs: {flight_count_day:<6,} New: {flight_count_new:<3,}"
     )
+
+    print(f"   Total Planes: {total:<6,}  30days: {total_mon:<6,}  24hrs: {total_day:<6,} New: {total_new:<4,}")
     print(
-        f" Hull Classes:   {type_count:<6,}  30days: {type_count_mon:<6,} 24hrs: {type_count_day:<6} New: {type_count_new:<3}"
+        f"     Hull Types: {type_count:<6,}  30days: {type_count_mon:<6,}  24hrs: {type_count_day:<6} New: {type_count_new:<3}"
     )
-    print(f" Total Planes:   {total:<6,}  30days: {total_mon:<6,} 24hrs: {total_day:<6,} New: {total_new:<4}")
     print()
     return types
 
@@ -1430,7 +1469,7 @@ def update_missing_data():
                 new = False
                 if not ptypes:
                     new = True
-                    logger.warning(f"!! New Plane Type !!: {icao} t:{ptype} m:{model}")
+                    logger.warning(f"!!    New Plane Type   !!: t:{ptype} m:{model} {icao} ")
                     sql = """INSERT INTO plane_types(ptype,last_icao,firstseen,lastseen,count,manufacturer,model)
                         VALUES(?,?,?,?,?,?,?) """
                     cur2.execute(sql, (ptype, icao, now, now, 1, mfr, model))
@@ -1665,6 +1704,7 @@ def run_daemon(refresh=10, sites=["127.0.0.1"]):
                             country = dets[3]
                             owner = dets[4]
                             military = dets[5]
+                        flight_level = get_flight_level(altitude)
 
                         # print(f'{icao} {reg} {ptype} {flight} {category} {squawk} {lat} {lon} {altitude} {heading} {distance} {speed}')
 
@@ -1691,10 +1731,12 @@ def run_daemon(refresh=10, sites=["127.0.0.1"]):
                                 ptype,
                                 distance,
                                 altitude,
+                                 flight_level,
                                 speed,
                                 squawk,
                                 heading,
                                 reg,
+                                owner,
                                 category,
                             )
                             # Only update plane_days if flight info
@@ -1705,6 +1747,7 @@ def run_daemon(refresh=10, sites=["127.0.0.1"]):
                                 ptype,
                                 distance,
                                 altitude,
+                                flight_level,
                                 heading,
                                 speed,
                                 reg,
@@ -1718,6 +1761,7 @@ def run_daemon(refresh=10, sites=["127.0.0.1"]):
                             model,
                             distance,
                             altitude,
+                            flight_level,
                             heading,
                             speed,
                             reg,
@@ -1726,12 +1770,14 @@ def run_daemon(refresh=10, sites=["127.0.0.1"]):
                             military,
                             category,
                             site,
+                            mfr,
                         )
                         if ptype:
                             new = update_ptype(ptype, icao, mfr, model)
+                            model_str = model[:11]
                             if new:
                                 logger.warning(
-                                    f"New Plane Type ({ptype})!!: {model} {icao} {reg} {flight} {country} {owner} d:{distance}"
+                                    f"!! NEW PLANE TYPE !!  ({ptype:<4}) {category:<2}: {mfr} {model_str:<8} r:{reg} fl:{flight} c:{country} o:{owner} d:{distance} {icao}"
                                 )
                                 if sounds and check_quiet_time():
                                     play_sound(
@@ -1828,8 +1874,8 @@ parser.add_argument(
     "-rs", type=str, help="Receiver IP List separated by commas (default 127.0.0.1)"
 )
 parser.add_argument("-st", action="store_true", help="Database Stats")
-parser.add_argument("-lf", type=str, help="Lookup Flights by Name (DAL%)")
-parser.add_argument("-lt", type=str, help="Lookup Planes by Type (B77%)")
+parser.add_argument("-lf", type=str, help="Lookup Flights by Name (DALpercent)")
+parser.add_argument("-lt", type=str, help="Lookup Planes by Type (B77percent)")
 parser.add_argument(
     "-lts", type=str, help="Lookup Type Totals by type (use percent-sign for all type)"
 )
