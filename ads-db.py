@@ -64,7 +64,8 @@ STATIC_CALL_SIGNS = [
     "ASH",
     "VXP",
     "FLE",
-
+    "SIL",
+    "TSC",
 ]
 
 # Create tables if they don't exist
@@ -417,7 +418,7 @@ def update_plane(
             ):
                 alerted[(icao, today)] = 1
                 dist_int = int(distance)
-                logger.info(
+                logger.warning(
                     f"Local Alert! {ident:>8} ({ptype:<4}) {category:<2} [{dist_int:>3}nm {flight_level:<5}] {ident:<7} {reg} {country} {owner} {mfr} {icao} site:{site}"
                 )
                 play_sound("/Users/yantisj/dev/ads-db/sounds/ding-high.mp3")
@@ -492,8 +493,10 @@ def update_plane_day(
         cur = conn.cursor()
         dist_int = int(distance)
         if call_sign:
+            fstr = f"Todays Flight {ident:>7} ({ptype}) {category:<2} [{dist_int:>3}nm {flight_level:<5}] {ident:>7} {from_airport:>4}<->{to_airport:<4} {reg:<6} {icao} site:{site}"
+
             logger.debug(
-                f"Todays Flight {ident:>7} ({ptype}) {category:<2} [{dist_int:>3}nm {flight_level:<5}] {ident:>7} {from_airport:>4}<>{to_airport:<4} {reg:<6} {icao} site:{site}"
+                fstr
             )
         else:
             logger.debug(
@@ -696,7 +699,7 @@ def update_flight(
             time.sleep(0.5)
             play_sound("/Users/yantisj/dev/ads-db/sounds/ding.mp3")
         else:
-            logger.info(f"New Flight    {flight:>7} ({ptype}) {category:<2} [{dist_int:>3}nm {flight_level:<5}] {flight:>7} {from_airport:>4}<>{to_airport:<4} {reg:<6} {icao} {owner}")
+            logger.info(f"New Flight    {flight:>7} ({ptype}) {category:<2} [{dist_int:>3}nm {flight_level:<5}] {flight:>7} {from_airport:>4}<->{to_airport:<4} {reg:<6} {icao} {owner}")
         sql = """INSERT INTO flights(flight,icao,ptype,distance,closest,altitude,lowest_altitude,speed,lowest_speed,squawk,heading,registration,from_airport,to_airport,firstseen,lastseen)
               VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) """
         cur.execute(
@@ -1204,7 +1207,7 @@ def alert_landing(
 ):
     global sounds
     today = date.today()
-
+    local_types = list()
 
     # Only alert on A3+ flights or flights that don't report
     alert_size = 3
@@ -1216,23 +1219,23 @@ def alert_landing(
         size = int(category[1])
     if "local_planes" in config["alerts"]:
         local_types = config["alerts"]["local_planes"].split(",")
-        if ptype in local_types and size < 3:
-            size = 3
+        if ptype in local_types and size < alert_size:
+            size = alert_size
 
     # print(f'ic:{icao}, ident:{ident}, sq:{squawk}, pt:{ptype}, dist:{distance}, alt:{altitude}, head:{heading}, spd:{speed}')
     if icao and distance and heading and speed and altitude:
         try:
             # and heading < 365 and heading > 240
             if (
-                distance < 4.0
+                distance < 3.2
                 and lat < 32.80
-                and lon < -79.90
+                and lon < -79.85 # -79.9
                 and baro_rate < 1000
                 and altitude > 1000
                 and altitude < 4500
                 and speed < 300
                 and speed > 145
-                and (heading > 310 or heading < 30)
+                and (heading > 300 or heading < 30)
             ):
                 if (icao, ident, today) not in alerted:
                     alerted[(icao, ident, today)] = 1
@@ -1243,15 +1246,15 @@ def alert_landing(
                     # Only alert on larger sizes or tracked types, otherwise log landing
                     if size >= alert_size:
                         logger.warning(
-                            f"Landing Alert {ident:>7} ({ptype:<4}) {category:<2} [{dist_int:>3}nm {flight_level:<5}] {ident:>7} {from_airport:>4}<>{to_airport:<4} {reg:<6} {icao} lat:{lat} lon:{lon}"
+                            f"Landing Alert {ident:>7} ({ptype:<4}) {category:<2} [{dist_int:>3}nm {flight_level:<5}] {ident:>7} {from_airport:>4}<->{to_airport:<4} {reg:<6} {icao} s:{speed} vs:{baro_rate} h:{heading} lat:{lat} lon:{lon}"
                         )
                         if sounds and check_quiet_time():
                             play_sound("/Users/yantisj/dev/ads-db/sounds/ding-low.mp3")
-                            if size == 5:
+                            if size == 5 or ptype in local_types:
                                 play_sound("/Users/yantisj/dev/ads-db/sounds/ding-low-fast.mp3")
                     else:
                         logger.info(
-                            f"Plane Landing {ident:>7} ({ptype:<4}) {category:<2} [{dist_int:>3}nm {flight_level:<5}] {ident:>7} {from_airport:>4}<>{to_airport:<4} {reg:<6} {icao} lat:{lat} lon:{lon}"
+                            f"Plane Landing {ident:>7} ({ptype:<4}) {category:<2} [{dist_int:>3}nm {flight_level:<5}] {ident:>7} {from_airport:>4}<->{to_airport:<4} {reg:<6} {icao} s:{speed} vs:{baro_rate} h:{heading} lat:{lat} lon:{lon}"
                         )
 
         except TypeError as e:
@@ -1552,7 +1555,6 @@ def update_missing_data():
             country = dets[3]
             owner = dets[4]
             military = dets[5]
-            year = dets[7]
             model = model[:50]
             if model:
                 models[ptype] = model
