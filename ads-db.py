@@ -29,6 +29,7 @@ save_cycle = 1
 logger = None
 
 alerted = dict()
+reactivated = dict()
 ptype_alerted = dict()
 pdict = dict()
 cdict = defaultdict(int)
@@ -90,7 +91,7 @@ sql_create_planes_table = """ CREATE TABLE IF NOT EXISTS planes (
                                     day_count integer,
                                     category text,
                                     opcode varchar(20),
-                                    status varchar(1),
+                                    status varchar(1)
                                 ); """
 
 sql_create_plane_days_table = """ CREATE TABLE IF NOT EXISTS plane_days (
@@ -138,7 +139,7 @@ sql_create_types_table = """ CREATE TABLE IF NOT EXISTS plane_types (
                                     manufacturer text,
                                     model text,
                                     category varchar(2),
-                                    active integer,
+                                    active integer
                                 ); """
 
 
@@ -188,10 +189,13 @@ def connect_ads_db(db_file):
         detect_types=sqlite3.PARSE_DECLTYPES | sqlite3.PARSE_COLNAMES,
     )
 
+    # Try to populated reactived database
     try:
         cur = conn_db.cursor()
-        cur.execute("SELECT * FROM planes WHERE icao=?", ("1234",))
+        cur.execute("SELECT icao FROM planes WHERE status=?", ("R",))
         rows = cur.fetchall()
+        for row in rows:
+            reactivated[row[0]] = 1
     except sqlite3.OperationalError as e:
         logger.warning(f"New Database: Trying to create DB: {e}")
 
@@ -216,8 +220,9 @@ def connect_ads_db(db_file):
         ]
         logger.warning(f"Initializing Database: {db_file}")
         for cmd in commands:
-            # print("DB Setup:", cmd)
+            print("DB Setup:", cmd)
             res = cur.execute(cmd)
+        conn_db.commit()
 
     return conn_db
 
@@ -305,6 +310,7 @@ def update_plane(
     if not rows:
         model_str = model[:11]
         dist_int = int(distance)
+        category = get_category(ptype)
         if ptype in alert_types:
             logger.warning(
                 f"NEW PLANE {model_str:>11} ({ptype:>4}) {category:<2} [{dist_int:>3}nm {flight_level:<5}] {ident:>7} {reg} {country} {owner} {mfr} {icao} site:{site}"
@@ -405,6 +411,7 @@ def update_plane(
             ):
                 alerted[(icao, today)] = 1
                 dist_int = int(distance)
+                category = get_category(ptype)
                 logger.warning(
                     f"Local Alert! {ident:>8} ({ptype:<4}) {category:<2} [{dist_int:>3}nm {flight_level:<5}] {ident:<7} {reg} {country} {owner} {mfr} {icao} site:{site}"
                 )
@@ -491,6 +498,7 @@ def update_plane_day(
     if not rows:
         cur = conn.cursor()
         dist_int = int(distance)
+        category = get_category(ptype)
         if call_sign:
             fstr = f"Todays Flight {ident:>7} ({ptype}) {category:<2} [{dist_int:>3}nm {flight_level:<5}] {ident:>7} {from_airport:>4}<->{to_airport:<4} {reg:<6} {icao} site:{site}"
 
@@ -672,6 +680,7 @@ def update_flight(
         logger.warning(f"New Database: Trying to create DB: {e}")
 
         create_table(conn, sql_create_flights_table)
+        conn.commit()
 
         # Setup indexes and initial DB
         commands = [
@@ -681,6 +690,7 @@ def update_flight(
         for cmd in commands:
             print("DB Setup:", cmd)
             res = cur.execute(cmd)
+        
 
         return
 
@@ -1284,6 +1294,13 @@ def alert_landing(
         alert_size = int(config["alerts"]["landing_size"])
     size = alert_size
 
+    parent_cat = get_category(ptype)
+    if category and parent_cat and parent_cat != category and (icao, 'catmiss') not in alerted:
+        alerted[(icao, 'catmiss')] = 1
+        logger.info(f"Category Mistmatch    ({ptype}) {parent_cat} (vs {category}) {icao}")
+    if parent_cat:
+        category = parent_cat
+
     if category and re.search("^A\d", category):
         size = int(category[1])
     if "local_planes" in config["alerts"]:
@@ -1315,7 +1332,7 @@ def alert_landing(
                     # Only alert on larger sizes or tracked types, otherwise log landing
                     if size >= alert_size:
                         logger.warning(
-                            f"Landing Alert {ident:>7} ({ptype:<4}) {category:<2} [{dist_int:>3}nm {flight_level:<5}] {ident:>7} {from_airport:>4}<->{to_airport:<4} {reg:<6} {icao} s:{speed} vs:{baro_rate} h:{heading} lat:{lat} lon:{lon}"
+                            f"Landing Alert {reg:>7} ({ptype:<4}) {category:<2} [{dist_int:>3}nm {flight_level:<5}] {ident:>7} lat:{lat} lon:{lon}"
                         )
                         if sounds and check_quiet_time():
                             play_sound("/Users/yantisj/dev/ads-db/sounds/ding-low.mp3")
@@ -1323,10 +1340,10 @@ def alert_landing(
                                 play_sound(
                                     "/Users/yantisj/dev/ads-db/sounds/ding-low-fast.mp3"
                                 )
-                    else:
-                        logger.info(
-                            f"Plane Landing {ident:>7} ({ptype:<4}) {category:<2} [{dist_int:>3}nm {flight_level:<5}] {ident:>7} {from_airport:>4}<->{to_airport:<4} {reg:<6} {icao} s:{speed} vs:{baro_rate} h:{heading} lat:{lat} lon:{lon}"
-                        )
+                    # Log details on all landing aircraft
+                    logger.info(
+                        f"Plane Landing {ident:>7} ({ptype:<4}) {category:<2} [{dist_int:>3}nm {flight_level:<5}] {ident:>7} {from_airport:>4}<->{to_airport:<4} {reg:<6} {icao} s:{speed} vs:{baro_rate} h:{heading} lat:{lat} lon:{lon}"
+                    )
 
         except TypeError as e:
             logger.critical(
@@ -1593,6 +1610,19 @@ def get_flight_data(flight):
             break
 
     return (from_airport, to_airport)
+
+
+def get_category(ptype):
+
+    cur = conn.cursor()
+    rows = dict_gen(cur.execute("SELECT category from plane_types WHERE ptype = ?", (ptype,)))
+    category = 'A0'
+    for row in rows:
+        category = row['category']
+
+    if not category:
+        category = ""
+    return category  
 
 
 def update_missing_data():
@@ -1898,7 +1928,7 @@ def run_daemon(refresh=10, sites=["127.0.0.1"]):
                         # Reactivate airframes that were marked parked/retired
                         if status != 'A':
                             status = 'R'
-                            if (icao, status) not in alerted:
+                            if (icao) not in reactivated:
                                 alerted[(icao, status)] = 1
                                 model_str = model[:6]
                                 logger.warning(f"Reactivate ({status}) {model_str:>6} ({ptype:>4}) {category:<2} [{dist_int:>3}nm {flight_level:<5}] {flight:>7} {reg} {country} {owner} {mfr} {icao} site:{site}")
@@ -1908,9 +1938,9 @@ def run_daemon(refresh=10, sites=["127.0.0.1"]):
                         # Play sounds on emergency bit set
                         if "emergency" in p:
                             if p["emergency"] and p["emergency"] != "none":
-                                if icao not in alerted:
-                                    alerted[icao] = 1
-                                    logger.warning(
+                                if (icao, 'emerg') not in alerted:
+                                    alerted[(icao, 'emerg')] = 1
+                                    logger.critical(
                                         f'Emergency Bit Set! {p["emergency"]}: i:{icao} r:{reg} t:{ptype} f:{flight} c:{category} a:{altitude} h:{heading} d:{distance} s:{speed}'
                                     )
                                     play_sound(
