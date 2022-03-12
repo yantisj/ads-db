@@ -1929,7 +1929,7 @@ def run_daemon(refresh=10, sites=["127.0.0.1"]):
                         if status != 'A':
                             status = 'R'
                             if (icao) not in reactivated:
-                                alerted[(icao, status)] = 1
+                                reactivated[icao] = 1
                                 model_str = model[:6]
                                 logger.warning(f"Reactivate ({status}) {model_str:>6} ({ptype:>4}) {category:<2} [{dist_int:>3}nm {flight_level:<5}] {flight:>7} {reg} {country} {owner} {mfr} {icao} site:{site}")
 
