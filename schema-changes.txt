@@ -1,2 +1,9 @@
+# Flight Updates 3/11/22
 ALTER TABLE flights add column from_airport text;
 ALTER TABLE flights add column to_airport text;
+
+# Plane type updates 3/12/22
+ALTER TABLE planes ADD COLUMN opcode varchar(20);
+ALTER TABLE planes ADD COLUMN status varchar(1);
+ALTER TABLE plane_types ADD COLUMN category varchar(2);
+ALTER TABLE plane_types ADD COLUMN active integer;
