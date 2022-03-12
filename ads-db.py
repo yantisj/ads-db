@@ -1297,7 +1297,7 @@ def alert_landing(
     parent_cat = get_category(ptype)
     if category and parent_cat and parent_cat != category and (icao, 'catmiss') not in alerted:
         alerted[(icao, 'catmiss')] = 1
-        logger.info(f"Category Mistmatch    ({ptype}) {parent_cat} (vs {category}) {icao}")
+        logger.debug(f"Category Mistmatch    ({ptype}) {parent_cat} (vs {category}) {icao}")
     if parent_cat:
         category = parent_cat
 
@@ -2057,12 +2057,12 @@ def run_daemon(refresh=10, sites=["127.0.0.1"]):
                 if fail_count[site] <= 5:
                     logger.warning(f"ConnectionError: {e}")
                 pass
-            # except Exception as e:
-            #     fail_count[str(e)] += 1
-            #     if fail_count[str(e)] <= 5:
-            #         logger.critical(f"General Update Exception: {e}")
-            #     time.sleep(1)
-            #     pass
+            except Exception as e:
+                fail_count[str(e)] += 1
+                if fail_count[str(e)] <= 5:
+                    logger.critical(f"General Update Exception: {e}")
+                time.sleep(1)
+                pass
         if not first_run:
             first_run = True
             logger.info(f"Daemon Started: Received {plane_count} planes")
