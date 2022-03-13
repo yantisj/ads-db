@@ -33,6 +33,9 @@ reactivated = dict()
 ptype_alerted = dict()
 pdict = dict()
 cdict = defaultdict(int)
+local_flights = dict()
+local_fixed = 10
+local_correct = 2
 lookup = None
 flight_conn = None
 sounds = False
@@ -461,6 +464,7 @@ def update_plane_day(
     category,
     site,
     owner,
+    baro_rate
 ):
     "Store planes per day. If callsign is True, store each ident per plane per day"
 
@@ -473,7 +477,6 @@ def update_plane_day(
 
     signs = get_call_signs()
 
-    (from_airport, to_airport) = get_flight_data(ident)
 
     # Track all flights instead of just plane days
     if (
@@ -488,6 +491,8 @@ def update_plane_day(
     for sign in signs:
         if re.search(f"^{sign}", ident):
             call_sign = True
+
+    (from_airport, to_airport) = get_flight_data(ident, distance=distance, altitude=altitude, vs=baro_rate, force=call_sign)
 
     try:
         cur = conn.cursor()
@@ -649,6 +654,7 @@ def update_flight(
     reg,
     owner,
     category,
+    baro_rate,
 ):
 
     if not flight:
@@ -659,7 +665,7 @@ def update_flight(
 
     signs = get_call_signs()
 
-    (from_airport, to_airport) = get_flight_data(flight)
+    (from_airport, to_airport) = get_flight_data(flight, distance=distance, altitude=altitude, vs=baro_rate)
 
     # Track all flights instead of just plane days
     if (
@@ -952,6 +958,8 @@ def lookup_ptype(
                 if cat_re:
                     cat = int(cat_re.group(1))
                     if cat and cat < cat_min:
+                        continue
+                    elif cat and cat > 5:
                         continue
                     elif not cat and no_a0:
                         continue
@@ -1362,8 +1370,8 @@ def alert_landing(
             # and heading < 365 and heading > 240
             if (
                 distance < 3.2
-                and lat < 32.80
-                and lon < -79.9  # -79.9
+                and lat < 32.777 # 3.8
+                and lon < -79.895  # -79.9
                 and baro_rate < 1000
                 and altitude > 1000
                 and altitude < 4500
@@ -1375,7 +1383,7 @@ def alert_landing(
                     alerted[(icao, ident, today)] = 1
                     flight_level = get_flight_level(altitude)
                     dist_int = int(distance)
-                    (from_airport, to_airport) = get_flight_data(ident)
+                    (from_airport, to_airport) = get_flight_data(ident, distance=distance, altitude=altitude, vs=baro_rate)
 
                     # Only alert on larger sizes or tracked types, otherwise log landing
                     if size >= alert_size:
@@ -1639,23 +1647,65 @@ def get_call_signs():
     return signs
 
 
-def get_flight_data(flight):
+def get_flight_data(flight, distance=0, altitude=0, vs=0, force=False):
 
-    if not flight_conn:
+    global local_fixed
+    global local_correct
+
+    if "local_airport" in config["flights"]:
+        LOCAL_AIRPORT = config["flights"]["local_airport"]
+
+    if not flight_conn and not force:
+        return ("", "")
+
+    if not flight_conn and not LOCAL_AIRPORT:
         return ("", "")
 
     from_airport = ""
     to_airport = ""
 
-    cur = flight_conn.cursor()
-    rows = dict_gen(
-        cur.execute("SELECT * FROM RouteView WHERE Callsign = ?", (flight,))
-    )
-    for row in rows:
-        if row:
-            from_airport = str(row["fromairporticao"])
-            to_airport = str(row["toairporticao"])
-            break
+    if flight_conn:
+        cur = flight_conn.cursor()
+        rows = dict_gen(
+            cur.execute("SELECT * FROM RouteView WHERE Callsign = ?", (flight,))
+        )
+        for row in rows:
+            if row:
+                from_airport = str(row["fromairporticao"])
+                to_airport = str(row["toairporticao"])
+                break
+
+    # Local Flight, fix flight numbers if incorrect
+    update = False
+    if LOCAL_AIRPORT and (from_airport or force) and distance and altitude:
+        if flight in local_flights:
+            (from_airport, to_airport) = local_flights[flight]
+        elif distance < 20 and altitude < 4500:
+            vs_range = False
+            if vs > 500:
+                vs_range = True
+                if from_airport != 'KCHS':
+                    from_airport = 'KCHS'
+                    update = True
+            elif vs < -500:
+                vs_range = True
+                if to_airport != 'KCHS':
+                    to_airport = 'KCHS'
+                    update = True
+            # else:
+            #     print('watching vs', flight, vs)
+            if update:
+                local_flights[(flight)] = (from_airport, to_airport)
+                local_fixed += 1
+                broken = round(local_fixed / (local_correct + local_fixed)*100)
+                logger.info(f"Local Flight Fix {flight} ({broken}%): {from_airport} <-> {to_airport} {vs}")
+
+            elif vs_range:
+                local_flights[(flight)] = (from_airport, to_airport)
+                local_correct += 1
+                broken = round(local_fixed / (local_correct + local_fixed)*100)
+                logger.info(f"Local Flight OK {flight} ({broken}%): {from_airport} <-> {to_airport}")
+
 
     return (from_airport, to_airport)
 
@@ -1942,19 +1992,19 @@ def run_daemon(refresh=10, sites=["127.0.0.1"]):
                         dist_int = int(distance)
 
                         # Reactivate airframes that were marked parked/retired and cache
-                        if status != 'A':
+                        if not status:
+                            status = 'A'
+                        elif status != 'A':
                             if (icao) not in reactivated:
                                 if not flight and holddown[(icao, 'reactivate')] < 5:
                                     holddown[(icao, 'reactivate')] += 1
-                                    # print('holddown reactivate')
                                 else:
                                     reactivated[icao] = 1
                                     model_str = model[:6]
                                     logger.warning(f"Reactivate ({status}) {model_str:>6} ({ptype:>4}) {category:<2} [{dist_int:>3}nm {flight_level:<5}] {flight:>7} {reg} {country} {owner} {mfr} {icao} site:{site}")
-                                    
-                                play_sound(
-                                    "/Users/yantisj/dev/ads-db/sounds/ding.mp3"
-                                )
+                                    play_sound(
+                                        "/Users/yantisj/dev/ads-db/sounds/ding.mp3"
+                                    )
                             status = 'R'
 
                         # print(f'{icao} {reg} {ptype} {flight} {category} {squawk} {lat} {lon} {altitude} {heading} {distance} {speed}')
@@ -1989,6 +2039,7 @@ def run_daemon(refresh=10, sites=["127.0.0.1"]):
                                 reg,
                                 owner,
                                 category,
+                                baro_rate,
                             )
                             # Only update plane_days if flight info
                             update_plane_day(
@@ -2005,6 +2056,7 @@ def run_daemon(refresh=10, sites=["127.0.0.1"]):
                                 category,
                                 site,
                                 owner,
+                                baro_rate
                             )
                         update_plane(
                             icao,

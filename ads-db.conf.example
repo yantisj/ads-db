@@ -26,6 +26,9 @@ base_station = sqb/BaseStation.sqb
 # Track all flights by default (noisy)
 all_flights = false
 
+## Rewrite Flights to use local airport if set and distance, altitude and vertical speed sane
+# local_airport = KCHS
+
 
 ## Play sounds for different planes and events
 [alerts]
