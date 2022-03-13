@@ -67,7 +67,18 @@ STATIC_CALL_SIGNS = [
     "FLE",
     "SIL",
     "TSC",
+    "SKW",
+    "WSW",
+    "SWG",
+    "AVA",
 ]
+
+STATIC_CATEGORIES = {
+    'E3TF': "A3",
+    'E8': "A3",
+    'B52': "A5",
+    'C17': "A5",
+}
 
 # Create tables if they don't exist
 sql_create_planes_table = """ CREATE TABLE IF NOT EXISTS planes (
@@ -91,7 +102,9 @@ sql_create_planes_table = """ CREATE TABLE IF NOT EXISTS planes (
                                     day_count integer,
                                     category text,
                                     opcode varchar(20),
-                                    status varchar(1)
+                                    status varchar(1),
+                                    model varchar(40),
+                                    serial varchar(30)
                                 ); """
 
 sql_create_plane_days_table = """ CREATE TABLE IF NOT EXISTS plane_days (
@@ -191,11 +204,15 @@ def connect_ads_db(db_file):
 
     # Try to populated reactived database
     try:
+        rcount = 0
         cur = conn_db.cursor()
         cur.execute("SELECT icao FROM planes WHERE status=?", ("R",))
         rows = cur.fetchall()
         for row in rows:
             reactivated[row[0]] = 1
+            rcount +=1
+        if rcount:
+            logger.info(f"Connected to DB: {rcount} Reactivated Planes")
     except sqlite3.OperationalError as e:
         logger.warning(f"New Database: Trying to create DB: {e}")
 
@@ -270,6 +287,7 @@ def update_plane(
     mfr,
     status,
     opcode,
+    serial
 ):
 
     now = datetime.now()
@@ -321,8 +339,8 @@ def update_plane(
             logger.info(
                 f"New Plane {model_str:>11} ({ptype:>4}) {category:<2} [{dist_int:>3}nm {flight_level:<5}] {ident:>7} {reg} {country} {owner} {mfr} {icao} site:{site}"
             )
-        sql = """INSERT INTO planes(icao,ident,ptype,speed,altitude,lowest_altitude,distance,closest,heading,firstseen,lastseen,registration,country,owner,military,day_count,category,status,opcode)
-              VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) """
+        sql = """INSERT INTO planes(icao,ident,ptype,speed,altitude,lowest_altitude,distance,closest,heading,firstseen,lastseen,registration,country,owner,military,day_count,category,status,opcode,model,serial)
+              VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) """
         cur.execute(
             sql,
             (
@@ -345,6 +363,8 @@ def update_plane(
                 category,
                 status,
                 opcode,
+                model,
+                serial
             ),
         )
     else:
@@ -376,7 +396,7 @@ def update_plane(
                 # print(distance, altitude)
                 low_dist = distance
                 low_alt = altitude
-            sql = """UPDATE planes SET ident = ?, ptype = ?, squawk = ?, speed = ?, altitude = ?, lowest_altitude = ?, distance = ?, closest = ?, heading = ?, lastseen = ?, registration = ?, country = ?, owner = ?, military = ?, day_count = ?, category = ?, status = ?, opcode = ?
+            sql = """UPDATE planes SET ident = ?, ptype = ?, squawk = ?, speed = ?, altitude = ?, lowest_altitude = ?, distance = ?, closest = ?, heading = ?, lastseen = ?, registration = ?, country = ?, owner = ?, military = ?, day_count = ?, category = ?, status = ?, opcode = ?, model = ?, serial = ?
                 WHERE icao = ? """
             cur.execute(
                 sql,
@@ -399,11 +419,13 @@ def update_plane(
                     category,
                     status,
                     opcode,
+                    model,
+                    serial,
                     icao,
                 ),
             )
             if (
-                ptype in local_types
+                (ptype in local_types or reg in local_types)
                 and (icao, today) not in alerted
                 and ident
                 and altitude < local_altitude
@@ -814,10 +836,11 @@ def update_ptype(ptype, icao, mfr, model, lastseen=None):
         cur.execute(sql, (ptype, icao, lastseen, lastseen, 1, mfr, model))
     else:
         row = rows[0]
-        cur.execute("SELECT category,status FROM planes WHERE ptype = ?", (ptype,))
+        cur.execute("SELECT category,status,model FROM planes WHERE ptype = ?", (ptype,))
         rows = cur.fetchall()
         pcount = 0
         categories = defaultdict(int)
+        models = defaultdict(int)
         active = 0
         inactive = 0
         for p in rows:
@@ -828,7 +851,9 @@ def update_ptype(ptype, icao, mfr, model, lastseen=None):
                 active += 1
             else:
                 inactive += 1
-        
+            if p[2]:
+                models[p[2]] += 1
+
         perc_active = 100
         if active and inactive:
             perc_active = round(active/(active + inactive)*100)
@@ -838,14 +863,24 @@ def update_ptype(ptype, icao, mfr, model, lastseen=None):
 
         # Get the top category if multiple categories for type level
         top_cat = "A0"
-        if ptype[0] == 'C':
-            top_cat = "A5"
         if categories:
             top_cat = list(
                 dict(
                     sorted(categories.items(), reverse=True, key=lambda item: item[1])
                 ).items()
             )[0][0]
+        if ptype in STATIC_CATEGORIES:
+            top_cat = STATIC_CATEGORIES[ptype]
+
+        top_model = model
+        if models:
+            top_model = list(
+                dict(
+                    sorted(models.items(), reverse=True, key=lambda item: item[1])
+                ).items()
+            )[0][0]
+        # if top_model != model:
+        #     print('Model Update', model, top_model)
 
         nmfr = row[5]
         if mfr:
@@ -855,7 +890,7 @@ def update_ptype(ptype, icao, mfr, model, lastseen=None):
         if model and nmfr:
             sql = """UPDATE plane_types SET last_icao = ?, lastseen = ?, count = ?, manufacturer = ?, model = ?, category = ?, active = ?
                 WHERE ptype = ? """
-            cur.execute(sql, (icao, lastseen, pcount, nmfr, model, top_cat, perc_active, ptype))
+            cur.execute(sql, (icao, lastseen, pcount, nmfr, top_model, top_cat, perc_active, ptype))
         # Partial data, don't update type
         else:
             sql = """UPDATE plane_types SET last_icao = ?, lastseen = ?, count = ?
@@ -882,13 +917,19 @@ def get_flight_level(altitude):
 
 
 def lookup_ptype(
-    ptype, count=0, cat_min=0, low_alt=0, no_a0=False, military=True, hours=0
+    ptype, count=0, cat_min=0, low_alt=0, no_a0=False, military=True, hours=0, owner=None
 ):
 
     cur = conn.cursor()
-    cur.execute(
-        "SELECT * FROM planes WHERE ptype LIKE ? ORDER BY lastseen DESC", (ptype,)
-    )
+    if owner:
+        cur.execute(
+            "SELECT * FROM planes WHERE ptype LIKE ? AND owner LIKE ? ORDER BY lastseen DESC", (ptype,owner,)
+        )
+    else:
+        cur.execute(
+            "SELECT * FROM planes WHERE ptype LIKE ? ORDER BY lastseen DESC", (ptype,)
+        )
+
     rows = cur.fetchall()
     new_rows = list()
 
@@ -936,10 +977,10 @@ def print_planes(rows):
     total = 0
     print("")
     print(
-        "IACO   TYPE  REG         IDENT      OPCODE    CAT M CT  S  DST MIN  ALT     LOW     COUNTRY     OWNER                FIRST                 LAST"
+        "IACO   TYPE  REG         IDENT      MODEL       CAT M CT  S DST MIN  ALT     LOW     COUNTRY     OWNER                FIRST                 LAST"
     )
     print(
-        "----   ----  ----------  ---------  -------   --- - --- -  --- ---  -----   -----   ----------  -------------------- -------------------   -------------------"
+        "----   ----  ----------  ---------  ----------- --- - --- - --- ---  -----   -----   ----------  -------------------- -------------------   -------------------"
     )
     for row in rows:
         total += 1
@@ -953,8 +994,9 @@ def print_planes(rows):
         mlt = ""
         day_count = 1
         cat = ""
-        status = "A"
+        status = " "
         opcode = ""
+        model = ""
         first = str(row[11]).split(".")[0]
         last = str(row[12]).split(".")[0]
 
@@ -982,8 +1024,12 @@ def print_planes(rows):
             opcode = row[19][:9]
         if row[20]:
             status = row[20]
+            if status == 'A':
+                status = '.'
+        if row[21]:
+            model = row[21][:11]
         print(
-            f"{row[0]:<5} {row[2]:<4}  {reg:11} {row[1]:<10} {opcode:<9} {cat:<3} {mlt:<1} {day_count:<3} {status:1} {distance:<3} {closest:<4} {altitude:<7} {alt_low:<7} {country:<10}  {owner:<20} {first:<10}   {last:<10}"
+            f"{row[0]:<5} {row[2]:<4}  {reg:11} {row[1]:<10} {model:<11} {cat:<3} {mlt:<1} {day_count:<3} {status:1} {distance:<3} {closest:<4} {altitude:<7} {alt_low:<7} {country:<10}  {owner:<20} {first:<10}   {last:<10}"
         )
 
     return total
@@ -1216,7 +1262,7 @@ def lookup_model_mfr(icao):
     # cur.execute("SELECT * FROM Aircraft LEFT JOIN Model ON Aircraft.ModelID = Model.ModelID LEFT JOIN Operator ON Aircraft.OperatorID = Operator.OperatorID WHERE Aircraft.Icao = ?", (icao,))
     # cur.execute("select Icao,Engines,Model,Manufacturer from AircraftTypeView WHERE Icao = ? LIMIT 1;", (ptype,))
     cur.execute(
-        "SELECT ModeS,OperatorFlagCode,CurrentRegDate,ModeSCountry,Country,AircraftClass,Engines,PopularName,Manufacturer,Type,RegisteredOwners,Registration,ICAOTypeCode,Status,OperatorFlagCode FROM Aircraft WHERE ModeS = ?",
+        "SELECT ModeS,OperatorFlagCode,CurrentRegDate,ModeSCountry,Country,AircraftClass,Engines,PopularName,Manufacturer,Type,RegisteredOwners,Registration,ICAOTypeCode,Status,OperatorFlagCode,SerialNo FROM Aircraft WHERE ModeS = ?",
         (icao,),
     )
     rows = cur.fetchall()
@@ -1237,6 +1283,7 @@ def lookup_model_mfr(icao):
     military = "."
     status = ""
     opcode = ""
+    serial = ""
 
     for r in rows:
         # print(r)
@@ -1260,13 +1307,14 @@ def lookup_model_mfr(icao):
         ptype = r[12]
         status = r[13]
         opcode = r[14]
+        serial = r[15]
 
         model = model[:50]
 
         if re.search(r"United\sStates", country):
             country = "USA"
 
-    return (ptype, mfr, model, country, owner, military, reg, status, opcode)
+    return (ptype, mfr, model, country, owner, military, reg, status, opcode, serial)
 
 
 def alert_landing(
@@ -1315,12 +1363,12 @@ def alert_landing(
             if (
                 distance < 3.2
                 and lat < 32.80
-                and lon < -79.85  # -79.9
+                and lon < -79.9  # -79.9
                 and baro_rate < 1000
                 and altitude > 1000
                 and altitude < 4500
                 and speed < 300
-                and speed > 145
+                and speed > 125
                 and (heading > 300 or heading < 30)
             ):
                 if (icao, ident, today) not in alerted:
@@ -1631,7 +1679,7 @@ def update_missing_data():
     cur = conn.cursor()
     cur2 = conn.cursor()
     now = datetime.now()
-    rows = dict_gen(cur.execute("SELECT * FROM planes ORDER BY lastseen DESC"))
+    rows = dict_gen(cur.execute("SELECT * FROM planes ORDER BY lastseen ASC"))
     # rows = cur.fetchall()
     count = 0
     models = dict()
@@ -1652,10 +1700,9 @@ def update_missing_data():
             reg,
             status,
             opcode,
+            serial
         ) = lookup_model_mfr(icao)
         if model:
-            models[ptype] = model
-        elif model and len(model) > len(models[ptype]):
             models[ptype] = model
         ptype_count[ptype] += 1
         if ptype and ptype not in ptyped:
@@ -1680,6 +1727,12 @@ def update_missing_data():
         elif opcode and opcode != row['opcode']:
             logger.info(f'Opcode needs updating ({ptype}): {opcode}')
             update = True
+        elif model and model != row['model']:
+            logger.info(f"Model Update {model} ({ptype})")
+            update = True
+        elif serial and serial != row['serial']:
+            logger.info(f"Serial Update {icao} {serial}")
+            update = True
         if update:
             if ptype:
                 cur2.execute("SELECT * FROM plane_types WHERE ptype=?", (ptype,))
@@ -1693,51 +1746,11 @@ def update_missing_data():
                     sql = """INSERT INTO plane_types(ptype,last_icao,firstseen,lastseen,count,manufacturer,model)
                         VALUES(?,?,?,?,?,?,?) """
                     cur2.execute(sql, (ptype, icao, now, now, 1, mfr, model))
-                else:
-                    prow = ptypes[0]
-                    cur2.execute("SELECT * FROM planes WHERE ptype = ?", (ptype,))
-                    prows = cur2.fetchall()
-                    pcount = 0
-                    for pc in prows:
-                        pcount += 1
-                    nmfr = prow[5]
-                    if mfr:
-                        nmfr = mfr
-
-                    sql = """UPDATE plane_types SET last_icao = ?, count = ?, manufacturer = ?, model = ?
-                        WHERE ptype = ? """
-                    cur2.execute(sql, (icao, pcount, nmfr, model, ptype))
 
             count += 1
-            sql = """UPDATE planes SET ptype = ?, registration = ?, country = ?, owner = ?, military = ?, status = ?, opcode = ?
+            sql = """UPDATE planes SET ptype = ?, registration = ?, country = ?, owner = ?, military = ?, status = ?, opcode = ?, model = ?, serial = ?
                 WHERE icao = ? """
-            cur2.execute(sql, (ptype, reg, country, owner, military, status, opcode, icao))
-
-    cur3 = conn.cursor()
-    rows = dict_gen(cur.execute("SELECT * FROM plane_types"))
-    for row in rows:
-        if row["ptype"] in models and row["model"] != models[row["ptype"]]:
-            logger.info(
-                f"Updating {row['ptype']} model: {row['model']} -> {models[row['ptype']]}"
-            )
-            sql = """UPDATE plane_types SET model = ?
-                WHERE ptype = ? """
-            cur3.execute(sql, (models[row["ptype"]], row["ptype"]))
-            count += 1
-            conn.commit()
-
-    # Update all plane type objects
-    for ptype in ptyped:
-        (nmfr, model) = ptyped[ptype]
-        if ptype in models:
-            model = models[ptype]
-        else:
-            model = model[:50]
-        pcount = ptype_count[ptype]
-        if model and nmfr:
-            sql = """UPDATE plane_types SET manufacturer = ?, model = ?, count = ?
-                WHERE ptype = ? """
-            cur.execute(sql, (nmfr, model, pcount, ptype))
+            cur2.execute(sql, (ptype, reg, country, owner, military, status, opcode, model, serial, icao))
 
     cur4 = conn.cursor()
     # Update missing fields and remove bad plane type objects
@@ -1746,8 +1759,10 @@ def update_missing_data():
         if row["ptype"] not in ptyped:
             print("Missing ptype", row["ptype"])
             # cur4.execute("DELETE FROM plane_types WHERE ptype = ?", (row["ptype"],))
-
         elif not row["active"]:
+            count += 1
+            update_ptype(row["ptype"], row["last_icao"], row["manufacturer"], row["model"], lastseen=row["lastseen"])
+        elif row["model"] != models[ptype]:
             count += 1
             update_ptype(row["ptype"], row["last_icao"], row["manufacturer"], row["model"], lastseen=row["lastseen"])
 
@@ -1921,17 +1936,26 @@ def run_daemon(refresh=10, sites=["127.0.0.1"]):
                             reg,
                             status,
                             opcode,
+                            serial
                         ) = lookup_model_mfr(icao)
                         flight_level = get_flight_level(altitude)
                         dist_int = int(distance)
 
-                        # Reactivate airframes that were marked parked/retired
+                        # Reactivate airframes that were marked parked/retired and cache
                         if status != 'A':
-                            status = 'R'
                             if (icao) not in reactivated:
-                                reactivated[icao] = 1
-                                model_str = model[:6]
-                                logger.warning(f"Reactivate ({status}) {model_str:>6} ({ptype:>4}) {category:<2} [{dist_int:>3}nm {flight_level:<5}] {flight:>7} {reg} {country} {owner} {mfr} {icao} site:{site}")
+                                if not flight and holddown[(icao, 'reactivate')] < 5:
+                                    holddown[(icao, 'reactivate')] += 1
+                                    # print('holddown reactivate')
+                                else:
+                                    reactivated[icao] = 1
+                                    model_str = model[:6]
+                                    logger.warning(f"Reactivate ({status}) {model_str:>6} ({ptype:>4}) {category:<2} [{dist_int:>3}nm {flight_level:<5}] {flight:>7} {reg} {country} {owner} {mfr} {icao} site:{site}")
+                                    
+                                play_sound(
+                                    "/Users/yantisj/dev/ads-db/sounds/ding.mp3"
+                                )
+                            status = 'R'
 
                         # print(f'{icao} {reg} {ptype} {flight} {category} {squawk} {lat} {lon} {altitude} {heading} {distance} {speed}')
 
@@ -2002,6 +2026,7 @@ def run_daemon(refresh=10, sites=["127.0.0.1"]):
                             mfr,
                             status,
                             opcode,
+                            serial
                         )
                         if ptype:
                             new = update_ptype(ptype, icao, mfr, model)
@@ -2119,6 +2144,7 @@ parser.add_argument("-li", type=str, help="Lookup Plane by IACO")
 parser.add_argument("-ld", type=str, help="Lookup Planes by IDENT/Flight #s")
 parser.add_argument("-lr", type=str, help="Lookup Planes by Registration")
 parser.add_argument("-lm", type=str, help="Lookup Planes by Manufacturer")
+parser.add_argument("-lo", type=str, help="Lookup Planes by Owner")
 parser.add_argument("-af", type=str, help="Alert on Flight Name / ICAO")
 parser.add_argument(
     "-ad", type=int, help="Alert Distance from Receiver (default unlimited)"
@@ -2175,6 +2201,9 @@ if args.sc:
     save_cycle = args.sc
     logger.info(f"Increasing Save Cycle to {args.sc}")
 
+if args.lo and not args.lt:
+    args.lt = '%'
+
 if args.update_db:
     load_fadb()
     logger.info("Updating All Plane Data")
@@ -2209,6 +2238,7 @@ elif args.st:
 elif args.lt:
     count = 0
     hours = 0
+    owner = args.lo
     if args.fd:
         count = args.fd
 
@@ -2237,6 +2267,7 @@ elif args.lt:
         no_a0=no_a0,
         military=military,
         hours=hours,
+        owner=owner
     )
 elif args.lts:
     hours = 0
