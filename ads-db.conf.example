@@ -10,8 +10,18 @@ lon = -79.9400
 # Alt https://data.flightairmap.com/ (no registration)
 base_station = sqb/BaseStation.sqb
 
-# Optional Flight Data: https://www.virtualradarserver.co.uk/FlightRoutes.aspx
+# Optional Flight Data (out of date): https://www.virtualradarserver.co.uk/FlightRoutes.aspx
 # standing_data = sqb/StandingData.sqb
+
+## Optional Flightaware API Key (Free for low volume flight SRC/DST Pairs)
+# May hit API limits initially (429), but will build in database cache
+# with timestamps
+#
+# flightaware_api = XWQERTWERT
+
+## Max API calls per process (reset when restarted)
+# If long running and ok with costs, set this higher
+# max_api_count = 1000
 
 
 ## Flight tracking is restricted to known commercial flights by default

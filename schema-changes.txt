@@ -11,3 +11,6 @@ ALTER TABLE plane_types ADD COLUMN active integer;
 # Model and Serial on each plane
 ALTER TABLE planes ADD COLUMN model varchar(40);
 ALTER TABLE planes ADD COLUMN serial varchar(30);
+
+# Flights add distance when available
+ALTER TABLE flights add column route_distance integer;

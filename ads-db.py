@@ -20,6 +20,8 @@ from datetime import date, datetime, timedelta
 import argparse
 import configparser
 import csv
+import json
+import requests
 import signal
 import sys
 
@@ -39,9 +41,14 @@ local_correct = 2
 lookup = None
 flight_conn = None
 sounds = False
+api_count = 0
 
 # Holddown empty data for a few cycles
 holddown = defaultdict(int)
+
+# Stop API Call's after threshold reached (reset when process reloads)
+MAX_API_COUNT = 1000
+AEROAPI_BASE_URL = "https://aeroapi.flightaware.com/aeroapi"
 
 STATIC_CALL_SIGNS = [
     "DAL",
@@ -143,6 +150,16 @@ sql_create_flights_table = """ CREATE TABLE IF NOT EXISTS flights (
                                     from_airport text,
                                     to_airport text,
                                     firstseen timestamp,
+                                    lastseen timestamp,
+                                    route_distance integer
+                                ); """
+
+sql_create_flight_cache_table = """ CREATE TABLE IF NOT EXISTS flight_cache (
+                                    flight text PRIMARY KEY,
+                                    from_airport text,
+                                    to_airport text,
+                                    distance int,
+                                    firstseen timestamp,
                                     lastseen timestamp
                                 ); """
 
@@ -205,6 +222,9 @@ def connect_ads_db(db_file):
         detect_types=sqlite3.PARSE_DECLTYPES | sqlite3.PARSE_COLNAMES,
     )
 
+
+    create_table(conn_db, sql_create_flight_cache_table)
+
     # Try to populated reactived database
     try:
         rcount = 0
@@ -215,7 +235,7 @@ def connect_ads_db(db_file):
             reactivated[row[0]] = 1
             rcount +=1
         if rcount:
-            logger.info(f"Connected to DB: {rcount} Reactivated Planes")
+            logger.debug(f"Connected to DB: {rcount} Reactivated Planes")
     except sqlite3.OperationalError as e:
         logger.warning(f"New Database: Trying to create DB: {e}")
 
@@ -223,6 +243,7 @@ def connect_ads_db(db_file):
         create_table(conn_db, sql_create_types_table)
         create_table(conn_db, sql_create_plane_days_table)
         create_table(conn_db, sql_create_flights_table)
+        create_table(conn_db, sql_create_flight_cache_table)
 
         # Setup indexes and initial DB
         commands = [
@@ -492,7 +513,7 @@ def update_plane_day(
         if re.search(f"^{sign}", ident):
             call_sign = True
 
-    (from_airport, to_airport) = get_flight_data(ident, distance=distance, altitude=altitude, vs=baro_rate, force=call_sign)
+    (from_airport, to_airport, route_distance) = get_flight_data(ident, distance=distance, altitude=altitude, vs=baro_rate, force=call_sign)
 
     try:
         cur = conn.cursor()
@@ -527,7 +548,7 @@ def update_plane_day(
         dist_int = int(distance)
         category = get_category(ptype)
         if call_sign:
-            fstr = f"Todays Flight {ident:>7} ({ptype}) {category:<2} [{dist_int:>3}nm {flight_level:<5}] {ident:>7} {from_airport:>4}<->{to_airport:<4} {reg:<6} {icao} site:{site}"
+            fstr = f"Todays Flight {ident:>7} ({ptype}) {category:<2} [{dist_int:>3}nm {flight_level:<5}] {ident:>7} {from_airport:>4}->{to_airport:<4}{route_distance:>5}nm {reg:<6} {icao} site:{site}"
 
             logger.debug(fstr)
         else:
@@ -665,8 +686,6 @@ def update_flight(
 
     signs = get_call_signs()
 
-    (from_airport, to_airport) = get_flight_data(flight, distance=distance, altitude=altitude, vs=baro_rate)
-
     # Track all flights instead of just plane days
     if (
         "flights" in config
@@ -685,6 +704,9 @@ def update_flight(
             alerted[(flight, "tracking")] = 1
             # logger.debug(f"Flight Tracking not enabled for this flight: {flight}")
         return
+
+    (from_airport, to_airport, route_distance) = get_flight_data(flight, distance=distance, altitude=altitude, vs=baro_rate, force=call_sign)
+
 
     now = datetime.now()
     today = date.today()
@@ -734,10 +756,10 @@ def update_flight(
             play_sound("/Users/yantisj/dev/ads-db/sounds/ding.mp3")
         else:
             logger.info(
-                f"New Flight    {flight:>7} ({ptype}) {category:<2} [{dist_int:>3}nm {flight_level:<5}] {flight:>7} {from_airport:>4}<->{to_airport:<4} {reg:<6} {icao} {owner}"
+                f"New Flight    {flight:>7} ({ptype}) {category:<2} [{dist_int:>3}nm {flight_level:<5}] {flight:>7} {from_airport:>4}->{to_airport:<4}{route_distance:>5}nm {reg:<6} {icao} {owner}"
             )
-        sql = """INSERT INTO flights(flight,icao,ptype,distance,closest,altitude,lowest_altitude,speed,lowest_speed,squawk,heading,registration,from_airport,to_airport,firstseen,lastseen)
-              VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) """
+        sql = """INSERT INTO flights(flight,icao,ptype,distance,closest,altitude,lowest_altitude,speed,lowest_speed,squawk,heading,registration,from_airport,to_airport,firstseen,lastseen,route_distance)
+              VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) """
         cur.execute(
             sql,
             (
@@ -757,6 +779,7 @@ def update_flight(
                 to_airport,
                 now,
                 now,
+                route_distance
             ),
         )
     else:
@@ -791,7 +814,7 @@ def update_flight(
                     low_dist = distance
                     low_alt = altitude
 
-                sql = """UPDATE flights SET icao=?, ptype=?, distance=?, closest=?, altitude=?, lowest_altitude=?, speed=?, lowest_speed=?, squawk=?, heading=?, registration=?, from_airport=?, to_airport=?, lastseen=?
+                sql = """UPDATE flights SET icao=?, ptype=?, distance=?, closest=?, altitude=?, lowest_altitude=?, speed=?, lowest_speed=?, squawk=?, heading=?, registration=?, from_airport=?, to_airport=?, lastseen=?, route_distance=?
                     WHERE flight = ? """
                 cur.execute(
                     sql,
@@ -810,6 +833,7 @@ def update_flight(
                         from_airport,
                         to_airport,
                         now,
+                        route_distance,
                         flight,
                     ),
                 )
@@ -1383,12 +1407,12 @@ def alert_landing(
                     alerted[(icao, ident, today)] = 1
                     flight_level = get_flight_level(altitude)
                     dist_int = int(distance)
-                    (from_airport, to_airport) = get_flight_data(ident, distance=distance, altitude=altitude, vs=baro_rate)
+                    (from_airport, to_airport, route_distance) = get_flight_data(ident, distance=distance, altitude=altitude, vs=baro_rate)
 
                     # Only alert on larger sizes or tracked types, otherwise log landing
                     if size >= alert_size:
                         logger.warning(
-                            f"Landing Alert {reg:>7} ({ptype:<4}) {category:<2} [{dist_int:>3}nm {flight_level:<5}] {ident:>7} lat:{lat} lon:{lon}"
+                            f"Landing Alert {reg:>7} ({ptype:<4}) {category:<2} [{dist_int:>3}nm {flight_level:<5}] {ident:>7} {from_airport:>4}->{to_airport:<4}{route_distance:>5}nm lat:{lat} lon:{lon}"
                         )
                         if sounds and check_quiet_time():
                             play_sound("/Users/yantisj/dev/ads-db/sounds/ding-low.mp3")
@@ -1398,7 +1422,7 @@ def alert_landing(
                                 )
                     # Log details on all landing aircraft
                     logger.info(
-                        f"Plane Landing {ident:>7} ({ptype:<4}) {category:<2} [{dist_int:>3}nm {flight_level:<5}] {ident:>7} {from_airport:>4}<->{to_airport:<4} {reg:<6} {icao} s:{speed} vs:{baro_rate} h:{heading} lat:{lat} lon:{lon}"
+                        f"Plane Landing {ident:>7} ({ptype:<4}) {category:<2} [{dist_int:>3}nm {flight_level:<5}] {ident:>7} {from_airport:>4}->{to_airport:<4}{route_distance:>5}nm {reg:<6} {icao} s:{speed} vs:{baro_rate} h:{heading} lat:{lat} lon:{lon}"
                     )
 
         except TypeError as e:
@@ -1649,20 +1673,32 @@ def get_call_signs():
 
 def get_flight_data(flight, distance=0, altitude=0, vs=0, force=False):
 
+    global flight_conn
     global local_fixed
     global local_correct
 
+    route_distance = 0
+
+    # In Memory Cache
+    if flight in local_flights:
+        return local_flights[flight]
+
+    # Check local flight DB cache populated via API
+    (from_airport, to_airport, route_distance) = flight_cache_check(flight)
+    if from_airport and to_airport:
+        local_flights[flight] = (from_airport, to_airport, route_distance)
+        return (from_airport, to_airport, route_distance)
+
+    # Local Airport DST/SRC detection via altitude and distance
     if "local_airport" in config["flights"]:
         LOCAL_AIRPORT = config["flights"]["local_airport"]
 
+    # force = known call sign
     if not flight_conn and not force:
-        return ("", "")
+        return (from_airport, to_airport, route_distance)
 
-    if not flight_conn and not LOCAL_AIRPORT:
-        return ("", "")
-
-    from_airport = ""
-    to_airport = ""
+    if not flight_conn and not LOCAL_AIRPORT and 'flightaware_api' not in config['db'] :
+        return (from_airport, to_airport, route_distance)
 
     if flight_conn:
         cur = flight_conn.cursor()
@@ -1678,9 +1714,7 @@ def get_flight_data(flight, distance=0, altitude=0, vs=0, force=False):
     # Local Flight, fix flight numbers if incorrect
     update = False
     if LOCAL_AIRPORT and (from_airport or force) and distance and altitude:
-        if flight in local_flights:
-            (from_airport, to_airport) = local_flights[flight]
-        elif distance < 20 and altitude < 4500:
+        if distance < 20 and altitude < 4500:
             vs_range = False
             if vs > 500:
                 vs_range = True
@@ -1695,19 +1729,106 @@ def get_flight_data(flight, distance=0, altitude=0, vs=0, force=False):
             # else:
             #     print('watching vs', flight, vs)
             if update:
-                local_flights[(flight)] = (from_airport, to_airport)
+                local_flights[flight] = (from_airport, to_airport, route_distance)
                 local_fixed += 1
                 broken = round(local_fixed / (local_correct + local_fixed)*100)
-                logger.info(f"Local Flight Fix {flight} ({broken}%): {from_airport} <-> {to_airport} {vs}")
+                logger.debug(f"Local Flight Fix {flight} ({broken}%): {from_airport} <-> {to_airport} {vs}")
 
             elif vs_range:
-                local_flights[(flight)] = (from_airport, to_airport)
+                local_flights[flight] = (from_airport, to_airport, route_distance)
                 local_correct += 1
                 broken = round(local_fixed / (local_correct + local_fixed)*100)
-                logger.info(f"Local Flight OK {flight} ({broken}%): {from_airport} <-> {to_airport}")
+                logger.debug(f"Local Flight OK {flight} ({broken}%): {from_airport} <-> {to_airport}")
+
+    if 'flightaware_api' in config['db'] and force:
+        (from_airport, to_airport, route_distance) = flight_api_lookup(flight, from_airport, to_airport)
+        local_flights[flight] = (from_airport, to_airport, route_distance)
+
+    return (from_airport, to_airport, route_distance)
 
 
-    return (from_airport, to_airport)
+def flight_api_lookup(flight, from_airport="", to_airport=""):
+    'Attempt API Lookup on Flight'
+    global api_count
+
+    AEROAPI = requests.Session()
+    AEROAPI.headers.update({"x-apikey": config['db']['flightaware_api']})
+
+    flightd = None
+    now = datetime.now()
+    cur = conn.cursor()
+
+    # Cache Check
+    (from_airport, to_airport, route_distance) = flight_cache_check(flight)
+    if from_airport and to_airport:
+        return (from_airport, to_airport, route_distance)
+
+    max_api_count = MAX_API_COUNT
+    if 'max_api_count' in config["db"]:
+        max_api_count = int(config["db"]["max_api_count"])
+
+    # Attempt API Lookup
+    if api_count > max_api_count:
+        logger.warning(f'API Count Limit!!! {api_count}')
+        return (from_airport, to_airport, route_distance)
+
+    try:
+        api_count += 1
+        result = AEROAPI.get(f"{AEROAPI_BASE_URL}/flights/{flight}")
+        if result.status_code != 200:
+            if result.status_code == 429:
+                logger.info("FlightAware API Throttled: 429")
+            else:
+                logger.warning(f"API Error {result.status_code}: {flight}")
+        else:
+            flightdict = result.json()
+            flightd = None
+            if "flights" in flightdict:
+                # print(json.dumps(flightdict, sort_keys=True, indent=4, separators=(',', ': ')))
+                for flight_entry in flightdict['flights']:
+                    if flight_entry['actual_off']:
+                        flightd = flight_entry
+                        # print('ACTUAL!!!!')
+                        # print(json.dumps(flightd, sort_keys=True, indent=4, separators=(',', ': ')))
+                        break
+            else:
+                logger.debug(f'No lookup: {flight}')
+                # print(json.dumps(flightdict, sort_keys=True, indent=4, separators=(',', ': ')))
+
+            if flightd:
+                from_airport = flightd['origin']['code']
+                to_airport = flightd['destination']['code']
+                route_distance = flightd['route_distance']
+                logger.debug(f'FA API Lookup {flight}: {from_airport} -> {to_airport} d:{route_distance}')
+                # print(from_airport, to_airport, now, flight,)
+                cur.execute("INSERT INTO flight_cache (flight,from_airport,to_airport,distance,firstseen,lastseen) VALUES(?,?,?,?,?,?)", (flight, from_airport, to_airport, route_distance, now, now,))  
+                # cur.execute("UPDATE flight_cache SET from_airport = ?, to_airport = ?, firstseen = ? WHERE flight = ?", (from_airport, to_airport, now, flight,))
+
+    except Exception as e:
+        print(flightd)
+        logger.warning(f"FA API Lookup Failed: {e}")
+
+    # Throttle API Lookups
+    time.sleep(5)
+    return (from_airport, to_airport, route_distance)
+
+
+def flight_cache_check(flight):
+    "Get any entry from flight cache"
+
+    cur = conn.cursor()
+    rows = dict_gen(
+        cur.execute("SELECT * FROM flight_cache WHERE flight = ?", (flight,))
+    )
+    if rows:
+        for row in rows:
+            from_airport = row['from_airport']
+            to_airport = row['to_airport']
+            route_distance = row['distance']
+            # logger.debug(f'Flight API Cache Hit {flight}: {from_airport} -> {to_airport} {route_distance}nm')
+            return (from_airport, to_airport, route_distance)
+    
+    return ("", "", 0)
 
 
 def get_category(ptype):
@@ -2246,7 +2367,7 @@ if "standing_data" in config["db"]:
     )
 if args.S:
     if not sounds:
-        logger.info("Enabling Sounds")
+        logger.debug("Enabling Sounds")
         sounds = True
 
 if args.sc:
@@ -2267,7 +2388,7 @@ elif args.D:
     load_fadb()
 
     if config["alerts"]["sounds"] in ["true", "True", "1"] and not sounds:
-        logger.info("Enabling Sounds")
+        logger.debug("Enabling Sounds")
         sounds = True
 
     sites = ["127.0.0.1"]
