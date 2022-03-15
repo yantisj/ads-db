@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # Plane Tracker Database
-#  - Reads from http://{site}/dump1090-fa/data/aircraft.json
+#  - Reads from http://{site}/skyaware/data/aircraft.json
 #  - Registration required better Basestation:
 #       https://radarspotting.com/forum/index.php?action=tportal;sa=download;dl=item521
 #  - Relies on BaseStation.sqb from https://data.flightairmap.com/ (no registration)
@@ -63,6 +63,7 @@ STATIC_CALL_SIGNS = [
     "JIA",
     "FDX",
     "UPS",
+    "DLH",
     "ACA",
     "ENY",
     "ROU",
@@ -81,6 +82,15 @@ STATIC_CALL_SIGNS = [
     "WSW",
     "SWG",
     "AVA",
+    "AWI",
+    "EUK",
+    "LAN",
+    "QTR",
+    "GTI",
+    "BAW",
+    "THY",
+    "TNO",
+    "ATN",
 ]
 
 STATIC_CATEGORIES = {
@@ -461,7 +471,7 @@ def update_plane(
                 logger.warning(
                     f"Local Alert! {ident:>8} ({ptype:<4}) {category:<2} [{dist_int:>3}nm {flight_level:<5}] {ident:<7} {reg} {country} {owner} {mfr} {icao} site:{site}"
                 )
-                play_sound("/Users/yantisj/dev/ads-db/sounds/ding-high.mp3")
+                play_sound("/Users/yantisj/dev/ads-db/sounds/ding.mp3")
                 play_sound("/Users/yantisj/dev/ads-db/sounds/ding-high.mp3")
 
         except TypeError as e:
@@ -1126,13 +1136,13 @@ def print_plane_days(rows, hours=0):
     return total
 
 
-def print_flights(rows, hours=0, low_alt=0):
+def print_flights(rows, hours=0, low_alt=0, route_distance=0):
 
     print(
-        "\nFLIGHT#   FROM  TO   PTYPE  REGISTR    ICAO    CT  DST MIN  ALT     LOW     FIRST                 LAST"
+        "\nFLIGHT#   FROM-->TO   DIST   TYPE  REGISTR    ICAO     CT DST  MIN   ALT     LOW     FIRST                 LAST"
     )
     print(
-        "-------   ---- ----  ----   --------   ------  --- --- ---  -----   -----   --------------------  -------------------"
+        "-------   ---- ----  ------  ----  --------   ------   --- --- --- -----   -----   --------------------  -------------------"
     )
 
     hours_ago = None
@@ -1146,6 +1156,14 @@ def print_flights(rows, hours=0, low_alt=0):
             continue
         if low_alt and r["lowest_altitude"] > low_alt:
             continue
+
+        r_distance = 0
+        try:
+            r_distance = int(r["route_distance"])
+        except TypeError:
+            pass
+        if route_distance and r_distance < route_distance:
+            continue
         count += 1
         distance = int(r["distance"])
         closest = int(r["closest"])
@@ -1155,8 +1173,9 @@ def print_flights(rows, hours=0, low_alt=0):
         last = str(r["lastseen"]).split(".")[0]
         from_airport = str(r["from_airport"])
         to_airport = str(r["to_airport"])
+
         print(
-            f"{r['flight']:<9} {from_airport:<4} {to_airport:<4}  {r['ptype']:<5}  {r['registration']:<8}   {r['icao']:<6}  {day_count:<3} {distance:<3} {closest:<4} {altitude:<7} {lowest_altitude:<7} {first:<10}   {last:<10}"
+            f"{r['flight']:<9} {from_airport:<4} {to_airport:<4}  {r_distance:>4}nm  {r['ptype']:<5} {r['registration']:<9}  {r['icao']:<6}   {day_count:<3} {distance:<3} {closest:<3} {altitude:<7} {lowest_altitude:<7} {first:<10}   {last:<10}"
         )
 
     return count
@@ -1224,7 +1243,7 @@ def lookup_ptypes(ptype, hours=0, mfr=None):
         print(f"\nAircraft Types: {total} / Total Aircraft: {planes}")
 
 
-def lookup_flight(flight, hours=0, low_alt=0):
+def lookup_flight(flight, hours=0, low_alt=0, route_distance=0):
 
     cur = conn.cursor()
     rows = dict_gen(
@@ -1233,7 +1252,7 @@ def lookup_flight(flight, hours=0, low_alt=0):
             (flight,),
         )
     )
-    total = print_flights(rows, hours=hours, low_alt=low_alt)
+    total = print_flights(rows, hours=hours, low_alt=low_alt, route_distance=route_distance)
     if total == 1:
         cur.execute(
             "SELECT * FROM plane_days WHERE ident = ? ORDER BY lastseen DESC", (flight,)
@@ -1473,7 +1492,7 @@ def alert_ident(ident, sites=["127.0.0.1"], min_distance=0):
         for site in sites:
             for ident in tracking:
                 r = requests.get(
-                    f"http://{site}/dump1090-fa/data/aircraft.json", timeout=5
+                    f"http://{site}/skyaware/data/aircraft.json", timeout=5
                 )
                 planes = r.json()
 
@@ -1777,7 +1796,7 @@ def flight_api_lookup(flight, from_airport="", to_airport=""):
         result = AEROAPI.get(f"{AEROAPI_BASE_URL}/flights/{flight}")
         if result.status_code != 200:
             if result.status_code == 429:
-                logger.info("FlightAware API Throttled: 429")
+                logger.info(f"FlightAware API Throttled ({api_count}): 429")
             else:
                 logger.warning(f"API Error {result.status_code}: {flight}")
         else:
@@ -1799,7 +1818,7 @@ def flight_api_lookup(flight, from_airport="", to_airport=""):
                 from_airport = flightd['origin']['code']
                 to_airport = flightd['destination']['code']
                 route_distance = flightd['route_distance']
-                logger.debug(f'FA API Lookup {flight}: {from_airport} -> {to_airport} d:{route_distance}')
+                logger.debug(f'FA API Lookup {flight:>7} ({api_count}): {from_airport} -> {to_airport} d:{route_distance}')
                 # print(from_airport, to_airport, now, flight,)
                 cur.execute("INSERT INTO flight_cache (flight,from_airport,to_airport,distance,firstseen,lastseen) VALUES(?,?,?,?,?,?)", (flight, from_airport, to_airport, route_distance, now, now,))  
                 # cur.execute("UPDATE flight_cache SET from_airport = ?, to_airport = ?, firstseen = ? WHERE flight = ?", (from_airport, to_airport, now, flight,))
@@ -2253,12 +2272,12 @@ def run_daemon(refresh=10, sites=["127.0.0.1"]):
             except requests.exceptions.ConnectionError as e:
                 fail_count[site] += 1
                 if fail_count[site] <= 5:
-                    logger.warning(f"ConnectionError: {e}")
+                    logger.warning(f"ConnectionError {site}: {e}")
                 pass
             except Exception as e:
                 fail_count[str(e)] += 1
                 if fail_count[str(e)] <= 5:
-                    logger.critical(f"General Update Exception: {e}")
+                    logger.critical(f"General Update Exception {site}: {e}")
                 time.sleep(1)
                 pass
         if not first_run:
@@ -2266,7 +2285,7 @@ def run_daemon(refresh=10, sites=["127.0.0.1"]):
             logger.info(f"Daemon Started: Received {plane_count} planes")
         if cdict_counter > save_cycle:
             cdict_counter = 0
-            if save_cycle >= 10:
+            if save_cycle > 50:
                 logger.info("Committing Data to DB")
             conn.commit()
 
@@ -2328,6 +2347,7 @@ parser.add_argument("-fc0", action="store_true", help="Filter A0 no categories")
 parser.add_argument("-fm", action="store_true", help="Filter Military Planes")
 parser.add_argument("-fh", type=float, help="Filter by hours since seen")
 parser.add_argument("-fd", type=int, help="Filter by Days Seen Above Count")
+parser.add_argument("-frd", type=int, help="Filter by Route Distance")
 parser.add_argument("-S", action="store_true", help="Play Sounds")
 parser.add_argument("-rf", type=int, help="Refresh Interval (default 10sec)")
 parser.add_argument("-db", type=str, help="Different Database File")
@@ -2454,7 +2474,7 @@ elif args.lf:
         hours = args.fh
     if args.fa:
         low_alt = args.fa
-    lookup_flight(args.lf, hours=hours, low_alt=low_alt)
+    lookup_flight(args.lf, hours=hours, low_alt=low_alt, route_distance=args.frd)
 elif args.lm:
     hours = 0
     if args.fh:
