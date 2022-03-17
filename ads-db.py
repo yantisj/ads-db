@@ -2115,7 +2115,7 @@ def run_daemon(refresh=10, sites=["127.0.0.1"]):
         for site in sites:
             try:
                 r = requests.get(
-                    f"http://{site}/dump1090-fa/data/aircraft.json", timeout=5
+                    f"http://{site}/skyaware/data/aircraft.json", timeout=5
                 )
                 planes = r.json()
                 fail_count[site] = 0
@@ -2369,12 +2369,12 @@ def sigterm_handler(_signo, _stack_frame):
     # Throttle kill calls and only save once on exit
     if not saving_db:
         saving_db = True
-        logger.warning("Caught Kill Signal, closing DB")
+        logger.warning("Caught SIGTERM, closing DB")
         conn.commit()
         logger.debug("DB Saved, exiting")
         sys.exit(0)
     else:
-        logger.info("Caught Kill, Still Saving Data to Disk")
+        logger.info("Caught SIGTERM, Still Saving Data to Disk")
 
 
 def sighup_handler(_signo, _stack_frame):
