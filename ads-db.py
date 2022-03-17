@@ -91,6 +91,23 @@ STATIC_CALL_SIGNS = [
     "THY",
     "TNO",
     "ATN",
+    "MNU",
+    "VIR",
+    "TAI",
+    "SAS",
+    "EIN",
+    "TOM",
+    "SCX",
+    "AUA",
+    "BCS",
+    "GJS",
+    "ASA",
+    "BAF",
+    "FIN",
+    "KLM",
+    "SUB",
+    "FRG",
+    "LPE",
 ]
 
 STATIC_CATEGORIES = {
@@ -293,11 +310,11 @@ def create_table(conn, create_table_sql):
 
 
 def play_sound(filename):
-    from playsound import playsound
-
+    
     global sounds
 
     if sounds and check_quiet_time():
+        from playsound import playsound
         playsound(filename)
 
 
@@ -367,8 +384,8 @@ def update_plane(
             logger.warning(
                 f"NEW PLANE {model_str:>11} ({ptype:>4}) {category:<2} [{dist_int:>3}nm {flight_level:<5}] {ident:>7} {reg} {country} {owner} {mfr} {icao} site:{site}"
             )
-            play_sound("/Users/yantisj/dev/ads-db/sounds/ding-high.mp3")
-            play_sound("/Users/yantisj/dev/ads-db/sounds/ding-high.mp3")
+            play_sound("/Users/yantisj/dev/ads-db/sounds/ding.mp3")
+            play_sound("/Users/yantisj/dev/ads-db/sounds/ding.mp3")
         else:
             logger.info(
                 f"New Plane {model_str:>11} ({ptype:>4}) {category:<2} [{dist_int:>3}nm {flight_level:<5}] {ident:>7} {reg} {country} {owner} {mfr} {icao} site:{site}"
@@ -459,7 +476,7 @@ def update_plane(
                 ),
             )
             if (
-                (ptype in local_types or reg in local_types)
+                (ptype in local_types or reg in local_types or ident in local_types)
                 and (icao, today) not in alerted
                 and ident
                 and altitude < local_altitude
@@ -558,7 +575,12 @@ def update_plane_day(
         dist_int = int(distance)
         category = get_category(ptype)
         if call_sign:
-            fstr = f"Todays Flight {ident:>7} ({ptype}) {category:<2} [{dist_int:>3}nm {flight_level:<5}] {ident:>7} {from_airport:>4}->{to_airport:<4}{route_distance:>5}nm {reg:<6} {icao} site:{site}"
+            route_type = get_route_type(route_distance)
+            if route_type:
+                flight_text = 'FLT ' + route_type
+            else:
+                flight_text = 'Flight'
+            fstr = f"Todays {flight_text:<6} {ident:>7} ({ptype}) {category:<2} [{dist_int:>3}nm {flight_level:<5}] {ident:>7} {from_airport:>4}->{to_airport:<4}{route_distance:>5}nm {reg:<6} {icao} site:{site}"
 
             logger.debug(fstr)
         else:
@@ -757,6 +779,12 @@ def update_flight(
     # print(f'ic:{icao}, ident:{ident}, sq:{squawk}, pt:{ptype}, dist:{distance}, alt:{altitude}, head:{heading}, spd:{speed}')
     if not rows:
         dist_int = int(distance)
+        route_type = get_route_type(route_distance)
+        if route_type:
+            flight_text = 'Flight ' + route_type
+        else:
+            flight_text = 'Flight'
+
         if flight in alert_flights:
             logger.warning(
                 f"ALERT FLT    {flight:>8} ({ptype}) {category:<2} [{dist_int:>3}nm {flight_level:<5}] {reg:<6} {icao} {owner}"
@@ -766,7 +794,7 @@ def update_flight(
             play_sound("/Users/yantisj/dev/ads-db/sounds/ding.mp3")
         else:
             logger.info(
-                f"New Flight    {flight:>7} ({ptype}) {category:<2} [{dist_int:>3}nm {flight_level:<5}] {flight:>7} {from_airport:>4}->{to_airport:<4}{route_distance:>5}nm {reg:<6} {icao} {owner}"
+                f"New {flight_text:<9} {flight:>7} ({ptype}) {category:<2} [{dist_int:>3}nm {flight_level:<5}] {flight:>7} {from_airport:>4}->{to_airport:<4}{route_distance:>5}nm {reg:<6} {icao} {owner}"
             )
         sql = """INSERT INTO flights(flight,icao,ptype,distance,closest,altitude,lowest_altitude,speed,lowest_speed,squawk,heading,registration,from_airport,to_airport,firstseen,lastseen,route_distance)
               VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) """
@@ -1136,7 +1164,7 @@ def print_plane_days(rows, hours=0):
     return total
 
 
-def print_flights(rows, hours=0, low_alt=0, route_distance=0):
+def print_flights(rows, hours=0, low_alt=0, route_distance=0, airport=None):
 
     print(
         "\nFLIGHT#   FROM-->TO   DIST   TYPE  REGISTR    ICAO     CT DST  MIN   ALT     LOW     FIRST                 LAST"
@@ -1164,7 +1192,8 @@ def print_flights(rows, hours=0, low_alt=0, route_distance=0):
             pass
         if route_distance and r_distance < route_distance:
             continue
-        count += 1
+
+        
         distance = int(r["distance"])
         closest = int(r["closest"])
         altitude = int(r["altitude"])
@@ -1173,6 +1202,11 @@ def print_flights(rows, hours=0, low_alt=0, route_distance=0):
         last = str(r["lastseen"]).split(".")[0]
         from_airport = str(r["from_airport"])
         to_airport = str(r["to_airport"])
+
+        if airport and from_airport != airport and to_airport != airport:
+            continue
+    
+        count += 1
 
         print(
             f"{r['flight']:<9} {from_airport:<4} {to_airport:<4}  {r_distance:>4}nm  {r['ptype']:<5} {r['registration']:<9}  {r['icao']:<6}   {day_count:<3} {distance:<3} {closest:<3} {altitude:<7} {lowest_altitude:<7} {first:<10}   {last:<10}"
@@ -1243,7 +1277,7 @@ def lookup_ptypes(ptype, hours=0, mfr=None):
         print(f"\nAircraft Types: {total} / Total Aircraft: {planes}")
 
 
-def lookup_flight(flight, hours=0, low_alt=0, route_distance=0):
+def lookup_flight(flight, hours=0, low_alt=0, route_distance=0, airport=None):
 
     cur = conn.cursor()
     rows = dict_gen(
@@ -1252,7 +1286,7 @@ def lookup_flight(flight, hours=0, low_alt=0, route_distance=0):
             (flight,),
         )
     )
-    total = print_flights(rows, hours=hours, low_alt=low_alt, route_distance=route_distance)
+    total = print_flights(rows, hours=hours, low_alt=low_alt, route_distance=route_distance, airport=airport)
     if total == 1:
         cur.execute(
             "SELECT * FROM plane_days WHERE ident = ? ORDER BY lastseen DESC", (flight,)
@@ -1688,6 +1722,24 @@ def get_call_signs():
         for sign in config["flights"]["extra_call_signs"].split(","):
             signs.append(sign)
     return signs
+
+
+def get_route_type(route_distance):
+    "Route type by distance (requires flight data)"
+
+    route_type = ""
+    if route_distance > 7500:
+        route_type = "UR"
+    if route_distance > 5000:
+        route_type = "XR"
+    elif route_distance > 3000:
+        route_type = "LR"
+    elif route_distance > 2000:
+        route_type = "ER"
+    # elif route_distance < 600:
+    #     route_type = "SH"
+
+    return route_type
 
 
 def get_flight_data(flight, distance=0, altitude=0, vs=0, force=False):
@@ -2231,7 +2283,6 @@ def run_daemon(refresh=10, sites=["127.0.0.1"]):
                                     play_sound(
                                         "/Users/yantisj/dev/ads-db/sounds/ding-high.mp3"
                                     )
-                                    time.sleep(1)
                                     play_sound(
                                         "/Users/yantisj/dev/ads-db/sounds/ding-high.mp3"
                                     )
@@ -2342,6 +2393,7 @@ parser.add_argument(
     "-ad", type=int, help="Alert Distance from Receiver (default unlimited)"
 )
 parser.add_argument("-fa", type=int, help="Filter Low Altitude")
+parser.add_argument("-fac", type=str, help="Airport Code")
 parser.add_argument("-fc", type=int, help="Filter Category Above int (A[3])")
 parser.add_argument("-fc0", action="store_true", help="Filter A0 no categories")
 parser.add_argument("-fm", action="store_true", help="Filter Military Planes")
@@ -2474,7 +2526,7 @@ elif args.lf:
         hours = args.fh
     if args.fa:
         low_alt = args.fa
-    lookup_flight(args.lf, hours=hours, low_alt=low_alt, route_distance=args.frd)
+    lookup_flight(args.lf, hours=hours, low_alt=low_alt, route_distance=args.frd, airport=args.fac)
 elif args.lm:
     hours = 0
     if args.fh:
