@@ -41,6 +41,7 @@ local_correct = 2
 lookup = None
 flight_conn = None
 sounds = False
+saving_db = False
 api_count = 0
 
 # Holddown empty data for a few cycles
@@ -2362,12 +2363,29 @@ def read_config(config_file):
 
 
 def sigterm_handler(_signo, _stack_frame):
-    logger.warning("Caught Kill Signal, closing DB")
+    "Catch Kill Signal and Close Database"
+    global saving_db
+
+    # Throttle kill calls and only save once on exit
+    if not saving_db:
+        saving_db = True
+        logger.warning("Caught Kill Signal, closing DB")
+        conn.commit()
+        logger.debug("DB Saved, exiting")
+        sys.exit(0)
+    else:
+        logger.info("Caught Kill, Still Saving Data to Disk")
+
+
+def sighup_handler(_signo, _stack_frame):
+    "Save DB to Disk on sighup"
+
+    logger.info("Saving DB to Disk")
     conn.commit()
-    sys.exit(0)
 
 
 signal.signal(signal.SIGTERM, sigterm_handler)
+signal.signal(signal.SIGHUP, sighup_handler)
 
 
 check_quiet_time()
@@ -2444,7 +2462,7 @@ if args.S:
 
 if args.sc:
     save_cycle = args.sc
-    logger.info(f"Increasing Save Cycle to {args.sc}")
+    logger.debug(f"Increasing Save Cycle to {args.sc}")
 
 if args.lo and not args.lt:
     args.lt = '%'
