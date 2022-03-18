@@ -109,7 +109,9 @@ STATIC_CALL_SIGNS = [
     "SUB",
     "FRG",
     "LPE",
-]
+    "JAF",
+
+]   
 
 STATIC_CATEGORIES = {
     'E3TF': "A3",
@@ -381,7 +383,10 @@ def update_plane(
         model_str = model[:11]
         dist_int = int(distance)
         category = get_category(ptype)
-        if ptype in alert_types:
+        size = 0
+        if re.search(r'A\d', category):
+            size = int(category[1])
+        if ptype in alert_types or size == 3:
             logger.warning(
                 f"NEW PLANE {model_str:>11} ({ptype:>4}) {category:<2} [{dist_int:>3}nm {flight_level:<5}] {ident:>7} {reg} {country} {owner} {mfr} {icao} site:{site}"
             )
@@ -478,12 +483,11 @@ def update_plane(
             )
             if (
                 (ptype in local_types or reg in local_types or ident in local_types)
-                and (icao, today) not in alerted
-                and ident
+                and (icao, today, 'local') not in alerted
                 and altitude < local_altitude
                 and distance < local_distance
             ):
-                alerted[(icao, today)] = 1
+                alerted[(icao, today, 'local')] = 1
                 dist_int = int(distance)
                 category = get_category(ptype)
                 logger.warning(
@@ -905,7 +909,7 @@ def update_ptype(ptype, icao, mfr, model, lastseen=None):
         cur.execute(sql, (ptype, icao, lastseen, lastseen, 1, mfr, model))
     else:
         row = rows[0]
-        cur.execute("SELECT category,status,model FROM planes WHERE ptype = ?", (ptype,))
+        cur.execute("SELECT category,status,model FROM planes WHERE ptype = ? AND NOT status = 'D'", (ptype,))
         rows = cur.fetchall()
         pcount = 0
         categories = defaultdict(int)
@@ -1328,7 +1332,7 @@ def lookup_ident(ident):
 def lookup_reg(reg):
 
     cur = conn.cursor()
-    cur.execute("SELECT * FROM planes WHERE registration LIKE ?", (reg,))
+    cur.execute("SELECT * FROM planes WHERE registration LIKE ? ORDER BY lastseen DESC", (reg,))
     rows = cur.fetchall()
     total = print_planes(rows)
     if total == 1:
@@ -1447,15 +1451,15 @@ def alert_landing(
         try:
             # and heading < 365 and heading > 240
             if (
-                distance < 3.2
+                distance < 3.7
                 and lat < 32.777 # 3.8
                 and lon < -79.895  # -79.9
                 and baro_rate < 1000
                 and altitude > 1000
                 and altitude < 4500
                 and speed < 300
-                and speed > 125
-                and (heading > 300 or heading < 30)
+                and speed > 130
+                and (heading > 280 or heading < 30)
             ):
                 if (icao, ident, today) not in alerted:
                     alerted[(icao, ident, today)] = 1
@@ -1464,13 +1468,13 @@ def alert_landing(
                     (from_airport, to_airport, route_distance) = get_flight_data(ident, distance=distance, altitude=altitude, vs=baro_rate)
 
                     # Only alert on larger sizes or tracked types, otherwise log landing
-                    if size >= alert_size:
+                    if size >= alert_size or re.search(r'^BOE', ident):
                         logger.warning(
                             f"Landing Alert {reg:>7} ({ptype:<4}) {category:<2} [{dist_int:>3}nm {flight_level:<5}] {ident:>7} {from_airport:>4}->{to_airport:<4}{route_distance:>5}nm lat:{lat} lon:{lon}"
                         )
                         if sounds and check_quiet_time():
                             play_sound("/Users/yantisj/dev/ads-db/sounds/ding-low.mp3")
-                            if size == 5 or ptype in local_types:
+                            if size == 5 or ptype in local_types or re.search(r'^BOE', ident):
                                 play_sound(
                                     "/Users/yantisj/dev/ads-db/sounds/ding-low-fast.mp3"
                                 )
@@ -1559,6 +1563,61 @@ def alert_ident(ident, sites=["127.0.0.1"], min_distance=0):
 
         time.sleep(3)
 
+
+def mark_dups():
+    "Check for duplicate serials and registration counts"
+
+    cur = conn.cursor()
+    rows = dict_gen(
+        cur.execute(
+            'SELECT * FROM planes ORDER BY lastseen DESC'
+        )
+    )
+
+    planes = dict()
+    count = 0
+    reg_count = 0
+    noserial = 0
+    year_ago = datetime.now() - timedelta(days=365)
+
+    for r in rows:
+        if not r['serial']:
+            noserial += 1
+            continue
+        elif (r['ptype'], r['serial']) not in planes:
+            planes[(r['ptype'], r['serial'])] = r
+        else:
+            count += 1
+            n = planes[(r['ptype'], r['serial'])]
+
+            if r['registration'] != n['registration']:
+                reg_count += 1
+
+            # print('OLD REG!', r)
+            n = planes[(r['ptype'], r['serial'])]
+            
+            # print('LATEST!', planes[(r['ptype'], r['serial'])])
+            if r['lastseen'] < n['firstseen'] or r['lastseen'] < year_ago:
+                if r['status'] != 'D':
+                    logger.info(f"Deactivate Registration ({r['ptype']}): nr:{n['registration']} ns:{n['serial']} nl:{n['lastseen']} VS or:{r['registration']} os:{r['serial']} ol:{r['lastseen']}")
+                    degregister_plane(r, n)
+                else:
+                    print(f"Registration Dup Deactive ({r['ptype']}): nr:{n['registration']} ni:{n['icao']} ns:{n['serial']} nl:{n['lastseen']} VS or:{r['registration']} ni:{n['icao']} os:{r['serial']} ol:{r['lastseen']}")
+            else:
+                print(f"ICAO Toggling ({r['ptype']}): nr:{n['registration']} ni:{n['icao']} ns:{n['serial']} nl:{n['lastseen']} VS or:{r['registration']} ni:{n['icao']} os:{r['serial']} ol:{r['lastseen']}")
+
+    print('Total Duplicate Serials:', count, 'Reg Mismatch:', reg_count, 'No serial:', noserial)
+    conn.commit()
+
+
+def degregister_plane(old, new):
+    "Deregister plane/icao"
+
+    cur = conn.cursor()
+    cur.execute(
+            'UPDATE planes SET status = "D" WHERE icao = ?', (old['icao'],)
+        )
+    
 
 def get_db_stats():
 
@@ -1965,8 +2024,17 @@ def update_missing_data():
                 if row["status"] == 'R':
                     update = False
                     logger.warning(f"DB Has active plane as out of service: {ptype} {icao}")
+                    status = 'R'
+                elif row["status"] == 'D':
+                    update = False
+                    logger.warning(f"DB Has Deactive Registration as {status}: {ptype} {icao}")
+                    status = 'D'
                 else:
                     logger.warning(f"Plane Retired / Out of Service ({status}): {ptype} {model} {reg} {owner} {row['lastseen']}")
+            elif row["status"] == 'D':
+                update = False
+                logger.warning(f"DB Has Deactive Registration as {status}: {ptype} {icao}")
+                status = 'D'
         elif opcode and opcode != row['opcode']:
             logger.info(f'Opcode needs updating ({ptype}): {opcode}')
             update = True
@@ -2002,13 +2070,14 @@ def update_missing_data():
         if row["ptype"] not in ptyped:
             print("Missing ptype", row["ptype"])
             # cur4.execute("DELETE FROM plane_types WHERE ptype = ?", (row["ptype"],))
-        elif not row["active"]:
-            count += 1
+        # elif not row["active"]:
+        #     count += 1
+        #     update_ptype(row["ptype"], row["last_icao"], row["manufacturer"], row["model"], lastseen=row["lastseen"])
+        # elif row["model"] != models[ptype]:
+        #     count += 1
+        else:
             update_ptype(row["ptype"], row["last_icao"], row["manufacturer"], row["model"], lastseen=row["lastseen"])
-        elif row["model"] != models[ptype]:
             count += 1
-            update_ptype(row["ptype"], row["last_icao"], row["manufacturer"], row["model"], lastseen=row["lastseen"])
-
     if count:
         logger.warning(f"Total Updates: {count}")
         conn.commit()
@@ -2429,6 +2498,9 @@ parser.add_argument(
     "--update_db", action="store_true", help="Update all planes with latest DB info"
 )
 parser.add_argument(
+    "--mark_dups", action="store_true", help="Check for duplicate serial numbers"
+)
+parser.add_argument(
     "--cleanup_db", action="store_true", help="Cleanup excess plane days"
 )
 args = parser.parse_args()
@@ -2473,6 +2545,8 @@ if args.update_db:
     update_missing_data()
 elif args.cleanup_db:
     cleanup_db()
+elif args.mark_dups:
+    mark_dups()
 
 elif args.D:
     load_fadb()
