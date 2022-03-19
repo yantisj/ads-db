@@ -110,7 +110,7 @@ STATIC_CALL_SIGNS = [
     "FRG",
     "LPE",
     "JAF",
-
+    "AMX",
 ]   
 
 STATIC_CATEGORIES = {
@@ -386,7 +386,7 @@ def update_plane(
         size = 0
         if re.search(r'A\d', category):
             size = int(category[1])
-        if ptype in alert_types or size == 3:
+        if ptype in alert_types or size == 5:
             logger.warning(
                 f"NEW PLANE {model_str:>11} ({ptype:>4}) {category:<2} [{dist_int:>3}nm {flight_level:<5}] {ident:>7} {reg} {country} {owner} {mfr} {icao} site:{site}"
             )
