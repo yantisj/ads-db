@@ -5,6 +5,7 @@
 #       https://radarspotting.com/forum/index.php?action=tportal;sa=download;dl=item521
 #  - Relies on BaseStation.sqb from https://data.flightairmap.com/ (no registration)
 #  - Uses flightaware csv for IACO -> PTYPE quick lookup (included but needs updating)
+#  - Investigate Shapely for geofencing
 #
 from collections import defaultdict, OrderedDict
 from operator import itemgetter
@@ -641,10 +642,13 @@ def update_plane_day(
 
             # Use Cache ident
             nident = row[2]
-            if ident and nident != ident:
+            size = 0
+            if re.search(r'A\d', category):
+                size = int(category[1])
+            if ident and nident != ident and size >= 3:
                 if ident not in alerted:
                     alerted[ident] = 1
-                    logger.info(f"Day Ident mismatch (Flight?): {ident}  <-> {nident}")
+                    logger.info(f"Day Ident mismatch ({ptype}) {category} {ident}  <-> {nident}")
             if ident:
                 nident = ident
             elif not nident:
@@ -994,11 +998,11 @@ def lookup_ptype(
     cur = conn.cursor()
     if owner:
         cur.execute(
-            "SELECT * FROM planes WHERE ptype LIKE ? AND owner LIKE ? ORDER BY lastseen DESC", (ptype,owner,)
+            "SELECT * FROM planes WHERE ptype LIKE ? AND owner LIKE ? AND NOT status = 'D' ORDER BY lastseen DESC", (ptype,owner,)
         )
     else:
         cur.execute(
-            "SELECT * FROM planes WHERE ptype LIKE ? ORDER BY lastseen DESC", (ptype,)
+            "SELECT * FROM planes WHERE ptype LIKE ? AND NOT status = 'D' ORDER BY lastseen DESC", (ptype,)
         )
 
     rows = cur.fetchall()
