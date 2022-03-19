@@ -19,8 +19,6 @@ from sqlite3 import Error
 from datetime import date, datetime, timedelta
 import argparse
 import configparser
-import csv
-import json
 import requests
 import signal
 import sys
