@@ -118,6 +118,7 @@ STATIC_CALL_SIGNS = [
     "PAC",
     "CKS",
     "AFR",
+    "CLX",
 ]   
 
 STATIC_CATEGORIES = {
@@ -1327,12 +1328,12 @@ def lookup_icao(icao):
 def lookup_ident(ident):
 
     cur = conn.cursor()
-    cur.execute("SELECT * FROM planes WHERE ident LIKE ?", (ident,))
+    cur.execute("SELECT * FROM planes WHERE ident LIKE ? ORDER by lastseen DESC", (ident,))
     rows = cur.fetchall()
     total = print_planes(rows)
     if total == 1:
         row = rows[0]
-        cur.execute("SELECT * FROM plane_days WHERE icao = ?", (row[0],))
+        cur.execute("SELECT * FROM plane_days WHERE icao = ? ORDER by lastseen DESC", (row[0],))
         rows = cur.fetchall()
         print_plane_days(rows)
     else:
