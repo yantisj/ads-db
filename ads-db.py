@@ -115,7 +115,6 @@ STATIC_CALL_SIGNS = [
     "SWQ",
     "BLX",
     "LRC",
-    ""
 ]   
 
 STATIC_CATEGORIES = {
