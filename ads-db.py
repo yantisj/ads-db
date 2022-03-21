@@ -112,6 +112,10 @@ STATIC_CALL_SIGNS = [
     "AMX",
     "CMP",
     "GLG",
+    "SWQ",
+    "BLX",
+    "LRC",
+    ""
 ]   
 
 STATIC_CATEGORIES = {
