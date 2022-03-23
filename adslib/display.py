@@ -1,4 +1,5 @@
 # Print/Display Routines
+from collections import defaultdict
 from datetime import date, datetime, timedelta
 from .helpers import dict_gen
 import logging
@@ -241,3 +242,130 @@ def lookup_ptypes(ptype, hours=0, mfr=None):
 
     if total > 1:
         print(f"\nAircraft Types: {total} / Total Aircraft: {planes}")
+
+
+def get_db_stats():
+
+    cur = conn.cursor()
+    cur.execute(
+        'SELECT icao,ptype,lastseen "[timestamp]", firstseen "[timestamp]" FROM planes ORDER BY lastseen ASC'
+    )
+
+    day_ago = datetime.now() - timedelta(days=1)
+    month_ago = datetime.now() - timedelta(days=30)
+
+    rows = cur.fetchall()
+
+    cur.execute(
+        'SELECT flight,ptype,lastseen "[timestamp]", firstseen "[timestamp]" FROM flights ORDER BY lastseen ASC'
+    )
+
+    all_flights = cur.fetchall()
+
+    types = defaultdict(int)
+    ttypes = dict()
+    ttypes_day = dict()
+    ttypes_mon = dict()
+    ttypes_new = dict()
+    ttypes_old = dict()
+    total = 0
+    total_day = 0
+    total_mon = 0
+    total_new = 0
+    type_count = 0
+    type_count_day = 0
+    type_count_mon = 0
+    type_count_new = 0
+    last_seen = ""
+
+    for row in rows:
+        total += 1
+        last_seen = str(row[2]).split(".")[0]
+
+        icao = row[0]
+        ptype = row[1]
+        types["TOTL"] += 1
+        types[ptype] += 1
+        if ptype not in ttypes:
+            ttypes[ptype] = 1
+            type_count += 1
+            types["TYPE"] = type_count
+        if row[3] < day_ago:
+            if ptype not in ttypes_old:
+                ttypes_old[ptype] = 1
+        if row[2] > day_ago:
+            total_day += 1
+            if ptype not in ttypes_day:
+                ttypes_day[ptype] = 1
+                type_count_day += 1
+        if row[2] > month_ago:
+            total_mon += 1
+            if ptype not in ttypes_mon:
+                ttypes_mon[ptype] = 1
+                type_count_mon += 1
+        if row[3] > day_ago:
+            total_new += 1
+            if ptype not in ttypes_new and ptype not in ttypes_old and ptype:
+                ttypes_new[ptype] = 1
+                type_count_new += 1
+
+    flights = defaultdict(int)
+    fflights = dict()
+    fflights_day = dict()
+    fflights_mon = dict()
+    fflights_new = dict()
+    fflights_old = dict()
+    ftotal = 0
+    ftotal_day = 0
+    ftotal_mon = 0
+    ftotal_new = 0
+    flight_count = 0
+    flight_count_day = 0
+    flight_count_mon = 0
+    flight_count_new = 0
+
+    for row in all_flights:
+        ftotal += 1
+        last_seen = str(row[2]).split(".")[0]
+
+        flight = row[0]
+        flights["TOTL"] += 1
+        flights[flight] += 1
+        if flight not in fflights:
+            fflights[flight] = 1
+            flight_count += 1
+            flights[icao] = type_count
+        if row[3] < day_ago:
+            if flight not in fflights_old:
+                fflights_old[flight] = 1
+        if row[2] > day_ago:
+            ftotal_day += 1
+            if flight not in fflights_day:
+                fflights_day[flight] = 1
+                flight_count_day += 1
+        if row[2] > month_ago:
+            ftotal_mon += 1
+            if flight not in fflights_mon:
+                fflights_mon[flight] = 1
+                flight_count_mon += 1
+        if row[3] > day_ago:
+            ftotal_new += 1
+            if flight not in fflights_new and flight not in fflights_old and flight:
+                fflights_new[flight] = 1
+                flight_count_new += 1
+
+    print(f"\n   ADS-DB Stats:                          [{last_seen}]")
+    print("=================================================================")
+    print(
+        f" Flight Numbers: {flight_count:<6,}  30days: {flight_count_mon:<6,}  24hrs: {flight_count_day:<6,} New: {flight_count_new:<3,}"
+    )
+
+    print(
+        f"   Total Planes: {total:<6,}  30days: {total_mon:<6,}  24hrs: {total_day:<6,} New: {total_new:<4,}"
+    )
+    print(
+        f"     Hull Types: {type_count:<6,}  30days: {type_count_mon:<6,}  24hrs: {type_count_day:<6} New: {type_count_new:<3}"
+    )
+    print()
+    return types
+
