@@ -13,3 +13,4 @@ BaseStation.sqb*
 start-env.sh
 ads-db.conf
 StandingData.sq*
+*pycache*
