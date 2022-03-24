@@ -49,9 +49,9 @@ def get_route_type(route_distance):
     "Route type by distance (requires flight data)"
 
     route_type = ""
-    if route_distance > 7500:
+    if route_distance > 7000:
         route_type = "UR"
-    if route_distance > 5000:
+    elif route_distance > 5000:
         route_type = "XR"
     elif route_distance > 3000:
         route_type = "LR"
