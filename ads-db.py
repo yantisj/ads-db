@@ -1115,7 +1115,8 @@ def alert_b787(icao, ident, reg, squawk, ptype, distance, altitude, heading, spe
         try:
             if (
                 altitude
-                and altitude < 20000
+                and altitude < 15000
+                and distance < 40
                 and (
                     re.search(r"^B78", ptype)
                     or (re.search("(BOE\d+|000000)", ident) and not ptype)
