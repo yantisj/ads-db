@@ -199,8 +199,8 @@ def update_plane(
     today = date.today()
     global sounds
 
-    # Holddown up to five cycles while waiting for better data
-    if not ident and holddown[icao] < 5:
+    # Holddown up to 8 cycles while waiting for better data
+    if not ident and holddown[icao] < 8:
         holddown[icao] += 1
         return
 

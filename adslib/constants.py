@@ -73,6 +73,7 @@ STATIC_CALL_SIGNS = [
     "CKS",
     "AFR",
     "CLX",
+    "LOT",
 ]   
 
 STATIC_CATEGORIES = {
