@@ -74,6 +74,14 @@ STATIC_CALL_SIGNS = [
     "AFR",
     "CLX",
     "LOT",
+    "TFL",
+    "ELY",
+    "BWA",
+    "IBE",
+    "SIA",
+    "OCN",
+    "NCR",
+    "CKS",
 ]   
 
 STATIC_CATEGORIES = {
