@@ -1622,9 +1622,10 @@ def run_daemon(refresh=10, sites=["127.0.0.1"]):
         cdict_counter += 1
         plane_count = 0
         for site in sites:
+            site_url = f"http://{site}/skyaware/data/aircraft.json"
             try:
                 r = requests.get(
-                    f"http://{site}/skyaware/data/aircraft.json", timeout=5
+                    site_url, timeout=5
                 )
                 planes = r.json()
                 fail_count[site] = 0
@@ -1844,7 +1845,7 @@ def run_daemon(refresh=10, sites=["127.0.0.1"]):
                 pass
         if not first_run:
             first_run = True
-            logger.info(f"Daemon Started: Received {plane_count} planes")
+            logger.info(f"Daemon Started: Received {plane_count} planes from {site_url}")
         if cdict_counter > save_cycle:
             cdict_counter = 0
             if save_cycle > 50:
